@@ -1,0 +1,9 @@
+{
+  "rules": {
+    "aa-comma-style": "off",
+    "no-print": "off",
+    "inline-if-style": "off",
+    "type-annotations": "off",
+    "no-stop": "error"
+  }
+}

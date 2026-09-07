@@ -1,0 +1,18 @@
+sub init()
+    m.body = m.top.findNode("body")
+    m.label = m.top.findNode("label")
+    m.timer = m.top.findNode("timer")
+    m.timer.observeField("fire", "onTimer")
+end sub
+
+sub onMessage()
+    if m.top.message = "" then return
+    m.label.text = m.top.message
+    m.body.visible = true
+    m.timer.control = "stop"
+    m.timer.control = "start"
+end sub
+
+sub onTimer()
+    m.body.visible = false
+end sub

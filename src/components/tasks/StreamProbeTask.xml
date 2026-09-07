@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Checks whether live streams answer, one at a time, off the render thread.
+    targets  = [{ streamId, url }]  in  - what to check, in order
+    progress = 12                   out - how many have been checked so far
+    dead     = ["857", "4130"]      out - set once, when the sweep finishes or is cut short
+
+  Strictly sequential: the account allows very few simultaneous connections, and a parallel
+  sweep would both fight with playback and look like abuse to the provider.
+-->
+<component name="StreamProbeTask" extends="Task">
+  <interface>
+    <field id="targets" type="array" />
+    <!-- HEAD for VOD: a GET on a movie would pull megabytes before the timeout cuts it off -->
+    <field id="method" type="string" value="GET" />
+    <field id="progress" type="integer" alwaysNotify="true" />
+    <field id="dead" type="array" alwaysNotify="true" />
+  </interface>
+  <script type="text/brighterscript" uri="StreamProbeTask.bs" />
+</component>

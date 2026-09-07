@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Modal digit entry, built from primitives rather than a stock node: PinDialog and ButtonGroup both
+  behaved differently than documented, and a 4-digit PIN on a full QWERTY keyboard is miserable.
+    prompt  = { title, masked }   shows the pad and takes focus
+    entered = "1234"              what was typed; "" means cancelled
+-->
+<component name="NumberPad" extends="Group">
+  <interface>
+    <field id="prompt" type="assocarray" alwaysNotify="true" onChange="onPrompt" />
+    <field id="entered" type="string" alwaysNotify="true" />
+  </interface>
+  <children>
+    <Group id="body" visible="false">
+      <Rectangle width="1920" height="1080" color="#0B0F19" opacity="0.9" />
+      <Rectangle translation="[720, 190]" width="480" height="700" color="#151B2B" />
+      <Label id="title" translation="[720, 220]" width="480" height="40" horizAlign="center"
+             font="font:MediumBoldSystemFont" color="#FFFFFF" />
+      <Rectangle translation="[770, 280]" width="380" height="72" color="#0B0F19" />
+      <Label id="display" translation="[770, 280]" width="380" height="72" horizAlign="center"
+             vertAlign="center" font="font:LargeBoldSystemFont" color="#FFFFFF" />
+      <!-- Keys are built in code; see buildKeys() -->
+      <Group id="keys" translation="[770, 380]" />
+    </Group>
+  </children>
+  <script type="text/brighterscript" uri="NumberPad.bs" />
+</component>

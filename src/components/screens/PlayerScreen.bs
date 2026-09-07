@@ -1,0 +1,484 @@
+import "pkg:/source/lib/Log.bs"
+import "pkg:/source/lib/Xtream.bs"
+import "pkg:/source/lib/Registry.bs"
+
+' Seconds to wait before the single automatic retry of a failed stream.
+const RETRY_DELAY_SECONDS = 2
+' Seconds of uninterrupted live playback before the "Still watching?" prompt (provider connection limits).
+const IDLE_PROMPT_SECONDS = 14400
+' How long that prompt waits for an answer before it stops the stream by itself.
+const IDLE_GRACE_SECONDS = 60
+' How often the resume position is written while watching.
+const PROGRESS_EVERY_SECONDS = 10
+
+sub init()
+    m.video = m.top.findNode("video")
+    m.bufferingGroup = m.top.findNode("bufferingGroup")
+    m.bufferingLabel = m.top.findNode("bufferingLabel")
+    m.retryTimer = m.top.findNode("retryTimer")
+    m.idleTimer = m.top.findNode("idleTimer")
+    m.graceTimer = m.top.findNode("graceTimer")
+
+    m.banner = m.top.findNode("banner")
+    m.numberEntry = m.top.findNode("numberEntry")
+    m.trackPicker = m.top.findNode("trackPicker")
+
+    m.playlist = []
+    m.index = -1
+    m.isLive = false
+    m.streamId = ""
+    m.zapped = false
+    m.progressId = ""
+    m.startPosition = 0
+    m.pendingSeek = 0
+    m.lastSaved = 0
+
+    m.failed = false
+    m.retried = false
+    m.reconnecting = false
+    m.pendingStops = 0
+    m.idleDialog = invalid
+
+    m.retryTimer.duration = RETRY_DELAY_SECONDS
+    m.idleTimer.duration = IDLE_PROMPT_SECONDS
+    m.graceTimer.duration = IDLE_GRACE_SECONDS
+
+    m.video.observeField("state", "onVideoState")
+    m.video.observeField("bufferingStatus", "onBufferingStatus")
+    m.video.observeField("position", "onPosition")
+    m.retryTimer.observeField("fire", "onRetryTimer")
+    m.idleTimer.observeField("fire", "onIdleTimer")
+    m.graceTimer.observeField("fire", "onGraceTimer")
+    m.numberEntry.observeField("channelNumber", "onNumberEntered")
+    m.trackPicker.observeField("selection", "onTrackSelection")
+    m.top.observeField("params", "onParams")
+    m.top.observeField("dispose", "onDispose")
+    m.defaultFocus = m.video
+end sub
+
+sub onParams()
+    p = m.top.params
+    m.url = Xtream.toStr(pick(p, "url", ""))
+    m.title = Xtream.toStr(pick(p, "title", ""))
+    m.streamFormat = Xtream.toStr(pick(p, "streamFormat", "hls"))
+    m.isLive = (pick(p, "isLive", false) = true)
+    m.playlist = pick(p, "playlist", [])
+    m.number = ""
+    m.streamId = ""
+    m.pendingStops = 0
+    m.progressId = Xtream.toStr(pick(p, "progressId", ""))
+    m.startPosition = Xtream.toInt(pick(p, "startPosition", 0))
+    m.lastSaved = 0
+
+    ' The built-in trickplay UI eats up/down, which is how live zapping works. VOD keeps it.
+    m.video.enableUI = not m.isLive
+
+    index = Xtream.toInt(pick(p, "playlistIndex", -1))
+    if index >= 0 and index < m.playlist.Count()
+        playAt(index, false) ' the channel you picked from the list: failure returns you there
+    else
+        m.index = -1
+        resetPlaybackState()
+        startPlayback()
+    end if
+end sub
+
+' ---------- playback ----------
+
+sub resetPlaybackState()
+    m.failed = false
+    m.retried = false
+    m.reconnecting = false
+end sub
+
+sub startPlayback()
+    Log.info("PlayerScreen", "play " + m.url)
+
+    content = CreateObject("roSGNode", "ContentNode")
+    content.url = m.url
+    content.title = m.title
+    content.streamFormat = m.streamFormat
+    content.live = m.isLive
+    content.HttpHeaders = ["User-Agent: " + Xtream.userAgent()]
+
+    ' ContentNode.playStart is ignored here, so the resume point is applied as a seek once the
+    ' Video node reports "playing" - before that it is silently dropped.
+    m.pendingSeek = m.startPosition
+
+    m.video.content = content
+    m.video.control = "play"
+    restartIdleTimer()
+end sub
+
+' ---------- zapping ----------
+
+' Plays playlist[index] in place - no screen push, so the list behind stays where it was.
+' fromZap marks items the viewer moved to themselves, which fail softly (see handleError).
+sub playAt(index as integer, fromZap = true as boolean)
+    if index < 0 or index >= m.playlist.Count() then return
+    m.zapped = fromZap
+
+    entry = m.playlist[index]
+    m.index = index
+    m.streamId = Xtream.toStr(pick(entry, "streamId", ""))
+    m.title = Xtream.toStr(pick(entry, "name", ""))
+    m.number = Xtream.toStr(pick(entry, "num", ""))
+    m.url = Xtream.toStr(pick(entry, "url", ""))
+    m.streamFormat = Xtream.toStr(pick(entry, "streamFormat", "hls"))
+    m.progressId = Xtream.toStr(pick(entry, "progressId", ""))
+    m.startPosition = 0
+    m.pendingSeek = 0
+    m.lastSaved = 0
+
+    resetPlaybackState()
+    m.retryTimer.control = "stop"
+    stopVideo()
+    startPlayback()
+    showBanner()
+    requestEpg()
+end sub
+
+sub zap(delta as integer)
+    count = m.playlist.Count()
+    if count = 0 or m.index < 0 then return
+    target = (m.index + delta + count) mod count
+    playAt(target)
+end sub
+
+function channelIndexByNumber(number as string) as integer
+    wanted = Xtream.toInt(number)
+    for i = 0 to m.playlist.Count() - 1
+        if Xtream.toInt(pick(m.playlist[i], "num", "")) = wanted then return i
+    end for
+    return -1
+end function
+
+sub onVideoState()
+    state = m.video.state
+    Log.info("PlayerScreen", "state=" + state)
+
+    if state = "error"
+        handleError()
+        return
+    end if
+
+    ' A deliberate stop reports "finished" too. Counted, not a flag: a zap stops and starts in one tick.
+    if state = "finished" or state = "stopped"
+        if m.pendingStops > 0
+            m.pendingStops -= 1
+            return
+        end if
+        if state = "finished" and not m.failed
+            saveProgress(Int(m.video.duration)) ' played out: clears the resume point
+            closeScreen()
+        end if
+        return
+    end if
+
+    if state = "playing" then applyPendingSeek()
+    showBuffering(state = "buffering")
+end sub
+
+' Resuming: jump to the stored position the first time playback actually runs.
+sub applyPendingSeek()
+    if m.pendingSeek <= 0 then return
+    target = m.pendingSeek
+    m.pendingSeek = 0
+
+    duration = Int(m.video.duration)
+    if duration > 0 and target >= duration - 5 then return ' effectively the end; start over instead
+    Log.info("PlayerScreen", "resume seek to " + target.ToStr())
+    m.video.seek = target
+end sub
+
+' Transient failure: replay once after 2 s. Definitive (401/403/404) or a second failure: dialog.
+sub handleError()
+    if m.failed then return
+
+    err = Xtream.playbackError(m.video.errorCode, m.video.errorStr, m.video.errorInfo)
+    Log.error("PlayerScreen", err.detail)
+
+    if not m.retried and not Xtream.isFatalHttpCode(err.httpCode)
+        m.retried = true
+        m.reconnecting = true
+        Log.info("PlayerScreen", "retrying once")
+        m.idleTimer.control = "stop"
+        stopVideo()
+        showBuffering(true)
+        m.bufferingLabel.text = "Reconnecting…"
+        m.retryTimer.control = "start"
+        return
+    end if
+
+    m.reconnecting = false
+    showBuffering(false)
+    m.idleTimer.control = "stop"
+    stopVideo()
+    ' We only get here once the retry has also failed, so the channel is broken - remember it and
+    ' keep it out of the list. Except a busy line, which says nothing about this channel.
+    if not Xtream.isLineBusyCode(err.httpCode) then Registry.markDead(m.streamId)
+
+    ' A dead channel you zapped to must not eject you: most of this panel is dead, and being thrown
+    ' back to the list on every Down press would make zapping useless.
+    if m.zapped
+        Log.info("PlayerScreen", "zap failed: " + err.message)
+        m.banner.message = m.title + " — " + err.message
+        return
+    end if
+
+    m.failed = true
+    message = err.message
+    #if DEBUG
+        message += Chr(10) + err.detail
+    #end if
+    showError(message, "Playback error")
+end sub
+
+' Every deliberate stop goes through here so onVideoState can tell it from end-of-content.
+sub stopVideo()
+    m.pendingStops += 1
+    m.video.control = "stop"
+end sub
+
+sub onRetryTimer()
+    m.reconnecting = false
+    startPlayback()
+end sub
+
+' Overrides BaseScreen: after a playback error there is nothing to show, go back to the list.
+sub onErrorDialogClosed()
+    closeScreen()
+end sub
+
+' ---------- resume positions ----------
+
+' position ticks about once a second; only every PROGRESS_EVERY_SECONDS is worth a registry write.
+sub onPosition()
+    if m.progressId = "" or m.isLive then return
+    position = Int(m.video.position)
+    if position <= 0 or Abs(position - m.lastSaved) < PROGRESS_EVERY_SECONDS then return
+    m.lastSaved = position
+    saveProgress(position)
+end sub
+
+' Registry.saveProgress drops anything barely started or past 90 % - that is "mark watched".
+sub saveProgress(position as integer)
+    if m.progressId = "" or m.isLive then return
+    duration = Int(m.video.duration)
+    if duration <= 0 then return
+    Registry.saveProgress(m.progressId, position, duration)
+end sub
+
+' ---------- buffering overlay ----------
+
+sub showBuffering(isVisible as boolean)
+    m.bufferingGroup.visible = isVisible
+    if not isVisible then m.bufferingLabel.text = "Buffering…"
+end sub
+
+sub onBufferingStatus()
+    if m.reconnecting or not m.bufferingGroup.visible then return
+
+    status = m.video.bufferingStatus
+    if status = invalid then return
+    raw = pick(status, "percentage", invalid)
+    if raw = invalid then return
+    isNumber = GetInterface(raw, "ifInt") <> invalid or GetInterface(raw, "ifFloat") <> invalid or GetInterface(raw, "ifDouble") <> invalid
+    if not isNumber then return
+
+    value = raw
+    if value > 0 and value <= 1 then value = value * 100 ' some firmwares report 0..1
+    percent = Int(value)
+    m.bufferingLabel.text = "Buffering… " + percent.ToStr() + "%"
+end sub
+
+' ---------- audio / subtitle tracks ----------
+
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+    restartIdleTimer()
+
+    if key = "options"
+        showTracksDialog()
+        return true
+    end if
+
+    if m.isLive
+        digit = digitFromKey(key)
+        if digit <> ""
+            m.numberEntry.digit = digit
+            return true
+        end if
+    end if
+
+    if m.playlist.Count() > 1
+        if key = "up"
+            zap(-1)
+            return true
+        else if key = "down"
+            zap(1)
+            return true
+        end if
+    end if
+    if key = "OK" and m.isLive
+        showBanner()
+        return true
+    end if
+
+    return false
+end function
+
+' Remotes with a number pad send "0".."9"; a keyboard / ECP Lit_1 arrives as "lit_1" - and the
+' case of that prefix is not guaranteed across firmware, so compare lowercased.
+function digitFromKey(key as string) as string
+    k = LCase(key)
+    if Len(k) = 1 and k >= "0" and k <= "9" then return k
+    if Left(k, 4) = "lit_"
+        c = Right(k, 1)
+        if c >= "0" and c <= "9" then return c
+    end if
+    return ""
+end function
+
+' ---------- channel banner ----------
+
+sub showBanner()
+    m.banner.channel = { num: m.number, name: m.title }
+end sub
+
+sub requestEpg()
+    if not m.isLive or m.streamId = "" then return
+    m.epgStreamId = Mid(m.streamId, Instr(1, m.streamId, ":") + 1) ' strip the "live:" namespace
+    m.epgFor = m.streamId
+    apiRequest("get_short_epg", { stream_id: m.epgStreamId, limit: 2 }, "onEpg")
+end sub
+
+sub onEpg(event as object)
+    res = event.getData()
+    if not res.ok
+        Log.error("PlayerScreen", "EPG: " + res.error)
+        return
+    end if
+    if m.epgFor <> m.streamId then return ' zapped away while the request was in flight
+
+    m.banner.epg = Xtream.nowNext(pick(res.data, "epg_listings", []))
+end sub
+
+' ---------- channel number entry ----------
+
+sub onNumberEntered()
+    entered = m.numberEntry.channelNumber
+    if entered = "" then return
+    index = channelIndexByNumber(entered)
+    if index >= 0
+        playAt(index)
+    else
+        m.banner.message = "Channel " + entered + " not found"
+    end if
+end sub
+
+sub showTracksDialog()
+    if m.failed then return
+    m.trackPicker.tracks = {
+        audio: m.video.availableAudioTracks
+        subtitles: m.video.availableSubtitleTracks
+        currentAudio: Xtream.toStr(m.video.audioTrack)
+        currentSubtitle: Xtream.toStr(m.video.subtitleTrack)
+    }
+end sub
+
+sub onTrackSelection()
+    chosen = m.trackPicker.selection
+    if m.defaultFocus <> invalid then m.defaultFocus.setFocus(true)
+    if chosen = invalid or chosen.kind = "none" then return
+
+    if chosen.kind = "audio"
+        m.video.audioTrack = chosen.id
+    else if chosen.kind = "subtitles"
+        m.video.subtitleTrack = chosen.id
+        m.video.globalCaptionMode = "On"
+    else
+        m.video.subtitleTrack = ""
+        m.video.globalCaptionMode = "Off"
+    end if
+    Log.info("PlayerScreen", "track " + chosen.kind + " -> " + chosen.id)
+end sub
+
+' ---------- idle prompt ----------
+
+sub restartIdleTimer()
+    m.idleTimer.control = "stop"
+    if m.isLive then m.idleTimer.control = "start"
+end sub
+
+' The stream keeps playing behind the dialog; it is only stopped if nobody answers, which is
+' what actually frees the provider connection.
+sub onIdleTimer()
+    if m.failed then return
+
+    dialog = CreateObject("roSGNode", "Dialog")
+    dialog.title = "Still watching?"
+    dialog.message = "Playback stops shortly to free up your provider connection."
+    dialog.buttons = ["Continue watching", "Exit"]
+    dialog.observeField("buttonSelected", "onIdleDialogButton")
+    dialog.observeField("wasClosed", "onIdleDialogClosed")
+    m.idleDialog = dialog
+    m.top.getScene().dialog = dialog
+
+    m.graceTimer.control = "start"
+end sub
+
+sub onIdleDialogButton()
+    index = 1
+    if m.idleDialog <> invalid then index = m.idleDialog.buttonSelected
+    if index = 0
+        continueWatching()
+    else
+        m.graceTimer.control = "stop"
+        dismissDialog()
+        stopAndClose()
+    end if
+end sub
+
+' Back on the dialog counts as "yes, still watching".
+sub onIdleDialogClosed()
+    if m.idleDialog = invalid then return
+    continueWatching()
+end sub
+
+sub continueWatching()
+    m.graceTimer.control = "stop"
+    dismissDialog()
+    restartIdleTimer()
+end sub
+
+' Nobody answered - stop the stream and leave the player.
+sub onGraceTimer()
+    Log.info("PlayerScreen", "idle prompt unanswered, stopping")
+    dismissDialog()
+    stopAndClose()
+end sub
+
+sub stopAndClose()
+    stopVideo()
+    closeScreen()
+end sub
+
+' ---------- dialog plumbing ----------
+
+' Overrides BaseScreen to also drop this screen's dialog references.
+sub dismissDialog()
+    scene = m.top.getScene()
+    if scene <> invalid then scene.dialog = invalid
+    m.idleDialog = invalid
+    if m.defaultFocus <> invalid then m.defaultFocus.setFocus(true)
+end sub
+
+sub onDispose()
+    saveProgress(Int(m.video.position))
+    m.retryTimer.control = "stop"
+    m.idleTimer.control = "stop"
+    m.graceTimer.control = "stop"
+    stopVideo()
+    m.video.content = invalid
+end sub

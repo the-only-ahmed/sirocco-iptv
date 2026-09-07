@@ -1,0 +1,282 @@
+import "pkg:/source/lib/Xtream.bs"
+import "pkg:/source/lib/Registry.bs"
+
+sub init()
+    m.subtitle = m.top.findNode("subtitle")
+    m.profilesList = m.top.findNode("profiles")
+    m.buttons = m.top.findNode("buttons")
+    m.hint = m.top.findNode("hint")
+
+    ' Host and Port are separate: people know their server as "host" and "port", not as a URL.
+    m.fieldOrder = ["host", "port", "username", "password"]
+    m.fieldLabels = ["Host", "Port", "Username", "Password"]
+    m.editingField = ""
+    m.deleteDialog = invalid
+    m.profiles = []
+
+    m.form = { host: "", port: "", username: "", password: "" }
+
+    m.profilesList.observeField("itemSelected", "onProfileSelected")
+    m.buttons.observeField("buttonSelected", "onButtonSelected")
+    m.top.observeField("params", "onParams")
+end sub
+
+sub onParams()
+    m.profiles = Registry.profiles()
+    if m.profiles.Count() > 0
+        showPicker()
+    else
+        showForm()
+    end if
+end sub
+
+' ---------- saved servers ----------
+
+sub showPicker()
+    m.profiles = Registry.profiles()
+    if m.profiles.Count() = 0
+        showForm()
+        return
+    end if
+
+    content = CreateObject("roSGNode", "ContentNode")
+    for each profile in m.profiles
+        item = content.createChild("ContentNode")
+        item.title = profileLabel(profile)
+    end for
+    addItem = content.createChild("ContentNode")
+    addItem.title = "+  Add a new server"
+
+    m.profilesList.content = content
+    m.profilesList.visible = true
+    m.buttons.visible = false
+
+    m.subtitle.text = "Choose a server"
+    m.hint.text = "OK to connect   ·   * to remove the highlighted server"
+    m.defaultFocus = m.profilesList
+    m.profilesList.setFocus(true)
+end sub
+
+sub onProfileSelected()
+    index = m.profilesList.itemSelected
+    if index = m.profiles.Count() ' the "add" row sits after the saved ones
+        m.form = { host: "", port: "", username: "", password: "" }
+        showForm()
+        return
+    end if
+    if index < 0 or index > m.profiles.Count() then return
+
+    profile = m.profiles[index]
+    parts = Xtream.splitBaseUrl(Registry.text(profile.baseUrl))
+    m.form = {
+        host: parts.host
+        port: parts.port
+        username: Registry.text(profile.username)
+        password: Registry.text(profile.password)
+    }
+    connect()
+end sub
+
+sub confirmDelete()
+    index = m.profilesList.itemFocused
+    if index < 0 or index >= m.profiles.Count() then return ' the "add" row is not deletable
+
+    profile = m.profiles[index]
+    dialog = CreateObject("roSGNode", "Dialog")
+    dialog.title = "Remove server"
+    dialog.message = hostOf(Registry.text(profile.baseUrl)) + " (" + Registry.text(profile.username) + ") will be removed from this list."
+    dialog.buttons = ["Remove", "Keep"]
+    dialog.observeField("buttonSelected", "onDeleteButton")
+    dialog.observeField("wasClosed", "onDeleteClosed")
+    m.deleteDialog = dialog
+    m.top.getScene().dialog = dialog
+end sub
+
+sub onDeleteButton()
+    if m.deleteDialog = invalid then return
+    remove = (m.deleteDialog.buttonSelected = 0)
+    index = m.profilesList.itemFocused
+    closeDeleteDialog()
+
+    if not remove or index < 0 or index >= m.profiles.Count() then return
+    Registry.deleteProfile(Registry.profileId(m.profiles[index]))
+    showPicker()
+end sub
+
+sub onDeleteClosed()
+    if m.deleteDialog = invalid then return
+    closeDeleteDialog()
+end sub
+
+sub closeDeleteDialog()
+    m.deleteDialog = invalid
+    scene = m.top.getScene()
+    if scene <> invalid then scene.dialog = invalid
+    m.profilesList.setFocus(true)
+end sub
+
+' What user_info told us the last time we connected, so an expiry is visible before connecting.
+function profileLabel(profile as object) as string
+    label = hostOf(Registry.text(profile.baseUrl)) + "   ·   " + Registry.text(profile.username)
+
+    expiry = Xtream.dateLabel(profile.expDate)
+    if expiry <> "" then label += "   ·   expires " + expiry
+
+    connections = Registry.number(profile, "maxConnections")
+    if connections > 0 then label += "   ·   " + connections.ToStr() + " connection"
+    if connections > 1 then label += "s"
+    return label
+end function
+
+' "http://host:8080" -> "host:8080"
+function hostOf(baseUrl as string) as string
+    url = baseUrl
+    if LCase(Left(url, 7)) = "http://" then return Mid(url, 8)
+    if LCase(Left(url, 8)) = "https://" then return Mid(url, 9)
+    return url
+end function
+
+' ---------- the form ----------
+
+sub showForm()
+    m.profilesList.visible = false
+    m.buttons.visible = true
+    m.subtitle.text = "Enter your Xtream Codes credentials"
+    m.hint.text = "Host example: provider.example   ·   Port: 8080   ·   an M3U URL pasted into Host fills everything in"
+    renderButtons()
+    m.defaultFocus = m.buttons
+    m.buttons.setFocus(true)
+end sub
+
+sub renderButtons()
+    masked = String(Len(m.form.password), "•")
+    m.buttons.buttons = [
+        "Host:      " + m.form.host
+        "Port:      " + m.form.port
+        "Username:  " + m.form.username
+        "Password:  " + masked
+        "Connect"
+    ]
+end sub
+
+sub onButtonSelected()
+    idx = m.buttons.buttonSelected
+    if idx = m.fieldOrder.Count()
+        connect()
+        return
+    end if
+    m.editingField = m.fieldOrder[idx]
+
+    ' A port is digits only, and a full QWERTY keyboard for four digits is miserable.
+    if m.editingField = "port"
+        askNumber("Port", false)
+        return
+    end if
+
+    askText(m.fieldLabels[idx], m.form[m.editingField])
+end sub
+
+' Overrides BaseScreen: the keyboard was editing one of the form fields.
+sub onTextEntered(value as string)
+    applyEdit(value)
+    m.buttons.setFocus(true)
+end sub
+
+' Host accepts a whole URL - or an M3U playlist URL, whose query string carries the credentials.
+' Port keeps only digits, since there is no numeric-only keyboard on this dialog.
+sub applyEdit(entered as string)
+    if m.editingField = "host"
+        m3u = Xtream.parseM3uUrl(entered)
+        if m3u <> invalid
+            m.form = { host: m3u.host, port: m3u.port, username: m3u.username, password: m3u.password }
+            renderButtons()
+            showToast("Credentials read from the M3U URL")
+            return
+        end if
+
+        parts = Xtream.splitBaseUrl(entered)
+        m.form.host = parts.host
+        if parts.port <> "" then m.form.port = parts.port
+    else if m.editingField = "port"
+        m.form.port = Xtream.digitsOf(entered)
+    else
+        m.form[m.editingField] = entered
+    end if
+    renderButtons()
+end sub
+
+' Overrides BaseScreen: the number pad was asking for the port.
+sub onNumberEntered(value as string)
+    if value <> "" then m.form.port = value
+    renderButtons()
+    m.buttons.setFocus(true)
+end sub
+
+' ---------- connecting ----------
+
+sub connect()
+    auth = {
+        baseUrl: Xtream.joinBaseUrl(m.form.host, m.form.port)
+        username: m.form.username.Trim()
+        password: m.form.password
+    }
+    ' hostOf() strips the scheme: "" means nothing was typed, and a leading ":" means only a port was.
+    named = hostOf(auth.baseUrl)
+    if named = "" or Left(named, 1) = ":" or auth.username = "" or auth.password = ""
+        showError("Host, username and password are all required.")
+        return
+    end if
+
+    m.global.auth = auth
+    setLoading(true)
+    apiRequest("", {}, "onConnectResponse")
+end sub
+
+sub onConnectResponse(event as object)
+    setLoading(false)
+    res = event.getData()
+    if not res.ok
+        showError(res.error, "Connection failed")
+        return
+    end if
+
+    info = res.data.user_info
+    authFlag = pick(info, "auth", 0)
+    if info = invalid or (authFlag <> 1 and authFlag <> "1")
+        showError("The server rejected these credentials.", "Login failed")
+        return
+    end if
+    if pick(info, "status", "Active") <> "Active"
+        showError("Account status: " + pick(info, "status", "unknown"), "Account inactive")
+        return
+    end if
+
+    auth = m.global.auth
+    auth.streamBaseUrl = Xtream.streamBaseFromServerInfo(res.data.server_info, auth.baseUrl)
+    m.global.auth = auth
+
+    account = {
+        expDate: Xtream.toInt(pick(info, "exp_date", 0))
+        maxConnections: Xtream.toInt(pick(info, "max_connections", 0))
+        activeConnections: Xtream.toInt(pick(info, "active_cons", 0))
+    }
+    m.global.account = account
+
+    Registry.writeAuth(auth)
+    Registry.saveProfile(auth, account) ' remembered for the picker, and survives logging out
+    navigateTo("HomeScreen", {}, true)
+end sub
+
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+    if key = "options" and m.profilesList.visible
+        confirmDelete()
+        return true
+    end if
+    ' Back out of the form to the saved list rather than out of the app.
+    if key = "back" and m.buttons.visible and Registry.profiles().Count() > 0
+        showPicker()
+        return true
+    end if
+    return false
+end function

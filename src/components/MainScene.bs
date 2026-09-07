@@ -1,0 +1,172 @@
+import "pkg:/source/lib/Registry.bs"
+import "pkg:/source/lib/Log.bs"
+import "pkg:/source/lib/Xtream.bs"
+
+sub init()
+    m.screens = m.top.findNode("screens")
+    m.stack = []
+    m.pendingDeepLink = invalid
+
+    ' Shared auth for every component / task: m.global.auth = { baseUrl, username, password }
+    m.global.addField("auth", "assocarray", false)
+    ' What user_info said: { expDate, maxConnections, activeConnections }. Home shows it.
+    m.global.addField("account", "assocarray", false)
+
+    auth = Registry.readAuth()
+    if auth <> invalid
+        m.global.auth = auth
+        ' Also record it as a saved server: an account that signed in before profiles existed (or
+        ' that only ever auto-logs-in) would otherwise never appear in the picker.
+        Registry.saveProfile(auth)
+        ' Auto-login never sees a login response, so the account details come from the saved profile.
+        profile = Registry.profileFor(auth)
+        if profile <> invalid
+            m.global.account = {
+                expDate: Registry.number(profile, "expDate")
+                maxConnections: Registry.number(profile, "maxConnections")
+                activeConnections: 0
+            }
+        end if
+        pushScreen("HomeScreen", {})
+        warmCache()
+        applyDeepLink(m.top.launchArgs) ' already set if the launch beat init() to it
+    else
+        pushScreen("LoginScreen", {})
+    end if
+
+    m.top.signalBeacon("AppLaunchComplete")
+end sub
+
+' Pull the category lists into the response cache in the background, so the first Live TV / Movies /
+' Series open is instant. Stream lists are left to fill in per category - holding every catalogue in
+' memory at once is the pressure we are trying to avoid on low-end sticks.
+sub warmCache()
+    m.warmTasks = []
+    for each action in ["get_live_categories", "get_vod_categories", "get_series_categories"]
+        task = CreateObject("roSGNode", "XtreamApiTask")
+        task.action = action
+        task.control = "RUN"
+        m.warmTasks.Push(task) ' held so the nodes are not collected mid-flight
+    end for
+end sub
+
+' ---------- navigation ----------
+
+sub pushScreen(name as string, params as object)
+    if m.stack.Count() > 0 then m.stack.Peek().visible = false
+
+    screen = CreateObject("roSGNode", name)
+    screen.observeField("navigate", "onNavigate")
+    screen.observeField("close", "onClose")
+    m.screens.appendChild(screen)
+    m.stack.Push(screen)
+    screen.params = params ' set after append so observers in the screen see a live node
+    screen.setFocus(true)
+    Log.info("MainScene", "push " + name + " (depth " + m.stack.Count().ToStr() + ")")
+end sub
+
+sub popScreen()
+    if m.stack.Count() <= 1 then return
+    screen = m.stack.Pop()
+    screen.dispose = true
+    m.screens.removeChild(screen)
+
+    top = m.stack.Peek()
+    top.visible = true
+    top.setFocus(true)
+end sub
+
+sub resetStack()
+    while m.stack.Count() > 0
+        screen = m.stack.Pop()
+        screen.dispose = true
+        m.screens.removeChild(screen)
+    end while
+end sub
+
+' ---------- deep linking ----------
+'
+' Roku requires this for certification, and it is how the mobile app will hand off a stream.
+' Test with: curl -d '' "http://<roku-ip>:8060/launch/dev?contentId=live:3&mediaType=movie"
+'
+' Two ways in, because launchArgs is set from the main thread right after Show() while init() runs
+' on the render thread: whoever gets there second finds the work already done.
+sub onLaunchArgs()
+    applyDeepLink(m.top.launchArgs)
+end sub
+
+sub applyDeepLink(args as object)
+    if args = invalid then return
+    contentId = Xtream.toStr(args.contentId)
+    if contentId = "" then return
+    Log.info("MainScene", "deep link contentId=" + contentId + " mediaType=" + Xtream.toStr(args.mediaType))
+
+    ' An assocarray field reads back as {} when unset, so check the contents, not the field.
+    auth = m.global.auth
+    if auth = invalid or Xtream.toStr(auth.baseUrl) = ""
+        Log.info("MainScene", "not signed in yet - deep link held until login")
+        m.pendingDeepLink = args
+        return
+    end if
+
+    m.pendingDeepLink = invalid
+    m.top.launchArgs = {} ' consumed: stops init() and onLaunchArgs() both acting on it
+    openDeepLink(contentId, Xtream.toStr(args.mediaType))
+end sub
+
+sub openDeepLink(contentId as string, mediaType as string)
+    ' "<kind>:<id>", the same namespaced form used for favorites and the dead list.
+    kind = "vod"
+    id = contentId
+    colon = Instr(1, contentId, ":")
+    if colon > 1
+        kind = LCase(Left(contentId, colon - 1))
+        id = Mid(contentId, colon + 1)
+    else
+        media = LCase(mediaType)
+        if media = "live" or media = "channel" then kind = "live"
+        if media = "series" or media = "season" then kind = "series"
+    end if
+
+    if kind = "live"
+        pushScreen("PlayerScreen", {
+            url: Xtream.liveStreamUrl(m.global.auth, id)
+            title: ""
+            streamFormat: "hls"
+            isLive: true
+        })
+    else if kind = "series"
+        pushScreen("SeriesScreen", { seriesId: id, title: "" })
+    else
+        ' The detail screen fetches the title, artwork and container for itself.
+        pushScreen("MovieDetailScreen", { streamId: id, title: "", ext: "mp4", poster: "" })
+    end if
+end sub
+
+' nav = { screen: "GridScreen", params: {...}, replace: false }
+sub onNavigate(event as object)
+    nav = event.getData()
+    if nav = invalid or nav.screen = invalid then return
+    params = nav.params
+    if params = invalid then params = {}
+    if nav.replace = true then resetStack()
+    pushScreen(nav.screen, params)
+    ' Fresh login: same warm-up as a relaunch that already had credentials.
+    if nav.screen = "HomeScreen" and nav.replace = true
+        warmCache()
+        ' A deep link that arrived at the login screen finally has an account to run against.
+        if m.pendingDeepLink <> invalid then applyDeepLink(m.pendingDeepLink)
+    end if
+end sub
+
+sub onClose(event as object)
+    if event.getData() = true then popScreen()
+end sub
+
+function onKeyEvent(key as string, press as boolean) as boolean
+    if press and key = "back" and m.stack.Count() > 1
+        popScreen()
+        return true
+    end if
+    return false ' back on the root screen exits the app
+end function

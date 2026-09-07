@@ -1,0 +1,51 @@
+sub init()
+    m.name = m.top.findNode("name")
+    m.time = m.top.findNode("time")
+    m.now = m.top.findNode("now")
+    m.nextLabel = m.top.findNode("nextLabel")
+    m.next = m.top.findNode("next")
+    m.progressBg = m.top.findNode("progressBg")
+    m.progress = m.top.findNode("progress")
+    m.hint = m.top.findNode("hint")
+end sub
+
+sub onChannelName()
+    m.name.text = m.top.channelName
+end sub
+
+sub onHint()
+    m.hint.text = m.top.hint
+end sub
+
+sub onEpg()
+    epg = m.top.epg
+    if epg = invalid or not epg.DoesExist("nowTitle")
+        render("", "", "", 0)
+        return
+    end if
+    render(asText(epg.nowTitle), asText(epg.time), asText(epg.nextTitle), asNumber(epg.progress))
+end sub
+
+sub onNotice()
+    render(m.top.notice, "", "", 0)
+end sub
+
+sub render(nowTitle as string, time as string, nextTitle as string, progress as float)
+    m.now.text = nowTitle
+    m.time.text = time
+    m.next.text = nextTitle
+    m.nextLabel.text = "Next"
+    if nextTitle = "" then m.nextLabel.text = ""
+    m.progress.width = m.progressBg.width * progress
+end sub
+
+function asText(value as dynamic) as string
+    if value = invalid or GetInterface(value, "ifString") = invalid then return ""
+    return value
+end function
+
+function asNumber(value as dynamic) as float
+    if value = invalid then return 0
+    if GetInterface(value, "ifFloat") <> invalid or GetInterface(value, "ifInt") <> invalid then return value
+    return 0
+end function

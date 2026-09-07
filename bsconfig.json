@@ -1,0 +1,18 @@
+{
+  "rootDir": "src",
+  "files": [
+    "manifest",
+    "source/**/*",
+    "components/**/*",
+    "images/**/*"
+  ],
+  "stagingDir": "build/staging",
+  "outFile": "build/sirocco-iptv.zip",
+  "retainStagingDir": true,
+  "autoImportComponentScript": false,
+  "sourceMap": true,
+  "plugins": ["@rokucommunity/bslint"],
+  "diagnosticFilters": [
+    { "src": "**/node_modules/**/*", "codes": [] }
+  ]
+}

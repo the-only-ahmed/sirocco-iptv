@@ -1,0 +1,372 @@
+import "pkg:/source/lib/Registry.bs"
+import "pkg:/source/lib/Xtream.bs"
+
+' Items shown per row. The API returns the whole catalogue; only the newest are worth a row.
+const ROW_SIZE = 20
+
+sub init()
+    m.rail = m.top.findNode("rail")
+    m.rows = m.top.findNode("rows")
+    m.account = m.top.findNode("account")
+    m.skeleton = m.top.findNode("skeleton")
+
+    m.liveCategories = []
+    m.recentMovies = []
+    m.recentSeries = []
+    m.continueItems = []
+    m.favoriteItems = []
+    m.rowSpec = []
+    m.pending = 0
+    m.loadedOnce = false
+
+    m.rail.observeField("selected", "onRailSelected")
+    m.rows.observeField("rowItemSelected", "onRowItemSelected")
+    m.top.observeField("params", "onParams")
+    m.top.observeField("visible", "onVisibleChanged")
+    m.defaultFocus = m.rail
+
+    m.account.text = accountLine()
+end sub
+
+' Who is signed in, and what user_info told us about the line.
+function accountLine() as string
+    auth = m.global.auth
+    if auth = invalid or auth.username = invalid then return ""
+
+    line = auth.username + " @ " + auth.baseUrl
+    account = m.global.account
+    if account = invalid then return line
+
+    expiry = Xtream.dateLabel(account.expDate)
+    if expiry <> "" then line += "   ·   expires " + expiry
+    connections = Registry.number(account, "maxConnections")
+    if connections > 0 then line += "   ·   " + connections.ToStr() + " connection"
+    if connections > 1 then line += "s"
+    return line
+end function
+
+sub onParams()
+    buildSkeleton()
+    loadRows()
+end sub
+
+' Back from a player or a detail screen: resume points and favorites have moved on. Refresh quietly -
+' the lists come from the cache, so no skeleton and no visible reload.
+sub onVisibleChanged()
+    if m.top.visible and m.loadedOnce then loadRows()
+end sub
+
+' ---------- loading ----------
+
+sub loadRows()
+    m.favorites = Registry.favoriteSet()
+    m.favoriteItems = []
+
+    m.pending = 3
+    apiRequest("get_live_categories", {}, "onLiveCategories")
+    apiRequest("get_vod_streams", {}, "onMovies")
+    apiRequest("get_series", {}, "onSeries")
+
+    ' Only pay for the live catalogue when a favorited channel actually needs resolving.
+    if hasFavoriteOfKind("live:")
+        m.pending += 1
+        apiRequest("get_live_streams", {}, "onLiveStreams")
+    end if
+end sub
+
+function hasFavoriteOfKind(prefix as string) as boolean
+    for each id in m.favorites
+        if Left(id, Len(prefix)) = prefix then return true
+    end for
+    return false
+end function
+
+sub onLiveCategories(event as object)
+    m.liveCategories = wrap("category", firstOf(event.getData(), ROW_SIZE), "category_name", "")
+    rowLoaded()
+end sub
+
+sub onMovies(event as object)
+    res = event.getData()
+    ' Panels list plenty of AVI, which Roku cannot open - never offer it on the home screen.
+    m.recentMovies = wrap("vod", newest(res, "added", true), "name", "stream_icon")
+    m.continueItems = wrap("vod", resumable(res), "name", "stream_icon")
+    collectFavorites("vod", dataOf(res), "stream_id", "name", "stream_icon")
+    rowLoaded()
+end sub
+
+sub onSeries(event as object)
+    res = event.getData()
+    m.recentSeries = wrap("series", newest(res, "last_modified", false), "name", "cover")
+    collectFavorites("series", dataOf(res), "series_id", "name", "cover")
+    rowLoaded()
+end sub
+
+sub onLiveStreams(event as object)
+    collectFavorites("live", dataOf(event.getData()), "stream_id", "name", "stream_icon")
+    rowLoaded()
+end sub
+
+sub rowLoaded()
+    m.pending -= 1
+    if m.pending > 0 then return
+    m.skeleton.visible = false
+    m.loadedOnce = true
+    buildRows()
+end sub
+
+' ---------- shaping the data ----------
+
+' Every row holds the same shape, so a mixed row (favorites) needs no special case.
+function wrap(kind as string, items as object, nameField as string, posterField as string) as object
+    out = []
+    for each raw in items
+        poster = ""
+        if posterField <> "" then poster = Xtream.toStr(pick(raw, posterField, ""))
+        out.Push({ kind: kind, raw: raw, name: Xtream.toStr(pick(raw, nameField, "Untitled")), poster: poster })
+    end for
+    return out
+end function
+
+sub collectFavorites(kind as string, items as object, idField as string, nameField as string, posterField as string)
+    for each raw in items
+        id = kind + ":" + Xtream.toStr(pick(raw, idField, ""))
+        if m.favorites.DoesExist(id)
+            m.favoriteItems.Push({ kind: kind, raw: raw, name: Xtream.toStr(pick(raw, nameField, "Untitled")), poster: Xtream.toStr(pick(raw, posterField, "")) })
+        end if
+    end for
+end sub
+
+function dataOf(res as object) as object
+    if res = invalid or not res.ok or res.data = invalid then return []
+    if GetInterface(res.data, "ifArray") = invalid then return []
+    return res.data
+end function
+
+' The newest `ROW_SIZE` entries by a unix-timestamp field. Xtream sends those as strings, and they
+' are all the same length, so a plain reverse sort orders them correctly.
+function newest(res as object, field as string, playableOnly as boolean) as object
+    data = dataOf(res)
+    if data.Count() = 0 then return []
+
+    data.SortBy(field, "r")
+    out = []
+    for each raw in data
+        if out.Count() >= ROW_SIZE then exit for
+        if not playableOnly or Xtream.isPlayableExt(pick(raw, "container_extension", ""))
+            out.Push(raw)
+        end if
+    end for
+    return out
+end function
+
+function firstOf(res as object, count as integer) as object
+    out = []
+    for each raw in dataOf(res)
+        if out.Count() >= count then exit for
+        out.Push(raw)
+    end for
+    return out
+end function
+
+' Movies with a saved resume point, newest first. Episodes also store progress, but resolving one to
+' a title needs a get_series_info per series, so the row is movies-only until that is worth doing.
+function resumable(res as object) as object
+    out = []
+    data = dataOf(res)
+    if data.Count() = 0 then return out
+
+    saved = Registry.progressList()
+    wanted = {}
+    for each entry in saved
+        if Left(entry.id, 4) = "vod:" then wanted[Mid(entry.id, 5)] = true
+    end for
+    if wanted.Count() = 0 then return out
+
+    found = {}
+    for each raw in data
+        id = Xtream.toStr(pick(raw, "stream_id", ""))
+        if wanted.DoesExist(id) then found[id] = raw
+    end for
+
+    for each entry in saved
+        if Left(entry.id, 4) = "vod:"
+            raw = found[Mid(entry.id, 5)]
+            if raw <> invalid then out.Push(raw)
+        end if
+    end for
+    return out
+end function
+
+' ---------- rows ----------
+
+' Rows are described rather than fixed: Continue watching and Favorites only exist some of the time.
+sub buildRows()
+    m.rowSpec = []
+    if m.continueItems.Count() > 0 then m.rowSpec.Push({ label: "Continue watching", items: m.continueItems })
+    if m.favoriteItems.Count() > 0 then m.rowSpec.Push({ label: "Favorites", items: m.favoriteItems })
+    m.rowSpec.Push({ label: "Live TV", items: m.liveCategories })
+    m.rowSpec.Push({ label: "Recently added movies", items: m.recentMovies })
+    m.rowSpec.Push({ label: "Recently added series", items: m.recentSeries })
+
+    content = CreateObject("roSGNode", "ContentNode")
+    for each spec in m.rowSpec
+        row = content.createChild("ContentNode")
+        row.title = spec.label
+        for each item in spec.items
+            node = row.createChild("ContentNode")
+            node.title = item.name
+            node.HDPOSTERURL = item.poster ' empty poster: RowItem draws a titled tile instead
+        end for
+    end for
+    m.rows.content = content
+end sub
+
+' A grid of empty tiles so the screen has shape while the lists load.
+sub buildSkeleton()
+    if m.skeleton.getChildCount() > 0
+        m.skeleton.visible = true
+        return
+    end if
+    for row = 0 to 1
+        for column = 0 to 5
+            tile = m.skeleton.createChild("Rectangle")
+            tile.width = 220
+            tile.height = 300
+            tile.color = "#151B2B"
+            tile.translation = [column * 244, row * 430]
+        end for
+    end for
+end sub
+
+' ---------- selection ----------
+
+function focusedItem() as object
+    selection = m.rows.rowItemFocused
+    if selection = invalid or selection.Count() < 2 then return invalid
+    return itemAt(selection[0], selection[1])
+end function
+
+function itemAt(rowIndex as integer, itemIndex as integer) as object
+    if rowIndex < 0 or rowIndex >= m.rowSpec.Count() then return invalid
+    items = m.rowSpec[rowIndex].items
+    if itemIndex < 0 or itemIndex >= items.Count() then return invalid
+    return items[itemIndex]
+end function
+
+sub onRowItemSelected()
+    selection = m.rows.rowItemSelected
+    if selection = invalid or selection.Count() < 2 then return
+    item = itemAt(selection[0], selection[1])
+    if item = invalid then return
+    raw = item.raw
+
+    if item.kind = "category"
+        navigateTo("LiveScreen", {
+            categoryId: Xtream.toStr(pick(raw, "category_id", ""))
+            title: item.name
+        })
+    else if item.kind = "vod"
+        navigateTo("MovieDetailScreen", {
+            streamId: Xtream.toStr(pick(raw, "stream_id", ""))
+            title: item.name
+            ext: Xtream.toStr(pick(raw, "container_extension", "mp4"))
+            poster: item.poster
+        })
+    else if item.kind = "series"
+        navigateTo("SeriesScreen", { seriesId: raw.series_id, title: item.name })
+    else
+        navigateTo("PlayerScreen", {
+            url: Xtream.liveStreamUrl(m.global.auth, pick(raw, "stream_id", ""))
+            title: item.name
+            streamFormat: "hls"
+            isLive: true
+        })
+    end if
+end sub
+
+sub onRailSelected()
+    key = m.rail.selected
+    if key = "home"
+        m.rows.setFocus(true)
+    else if key = "search"
+        navigateTo("SearchScreen", {})
+    else if key = "live"
+        navigateTo("LiveScreen", {})
+    else if key = "vod"
+        navigateTo("CategoryScreen", { type: "vod", title: "Movies" })
+    else if key = "series"
+        navigateTo("CategoryScreen", { type: "series", title: "Series" })
+    else if key = "settings"
+        navigateTo("SettingsScreen", {})
+    else if key = "logout"
+        Registry.clearAuth()
+        m.global.auth = {}
+        navigateTo("LoginScreen", {}, true)
+    end if
+end sub
+
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+
+    if key = "right" and m.rail.isInFocusChain() and m.rows.content <> invalid
+        m.rows.setFocus(true)
+        return true
+    else if key = "left" and m.rows.isInFocusChain()
+        m.rail.setFocus(true)
+        return true
+    else if key = "options" and m.rows.isInFocusChain()
+        item = focusedItem()
+        if item <> invalid and item.kind <> "category"
+            toggleFavorite(favoriteKey(item), item.name)
+            refreshFavorites(item)
+        end if
+        return true
+    end if
+    return false
+end function
+
+' Update the Favorites row there and then. Reloading would mean re-reading three catalogues, and
+' rebuilding the RowList drops focus to the first item, so the position is restored by row label -
+' row indexes shift when the Favorites row appears or disappears.
+sub refreshFavorites(item as object)
+    key = favoriteKey(item)
+    kept = []
+    for each existing in m.favoriteItems
+        if favoriteKey(existing) <> key then kept.Push(existing)
+    end for
+    if Registry.isFavorite(key) then kept.Unshift(item) ' newest first, matching the registry order
+    m.favoriteItems = kept
+
+    label = ""
+    itemIndex = 0
+    focused = m.rows.rowItemFocused
+    if focused <> invalid and focused.Count() >= 2 and focused[0] < m.rowSpec.Count()
+        label = m.rowSpec[focused[0]].label
+        itemIndex = focused[1]
+    end if
+
+    buildRows()
+    restoreFocus(label, itemIndex)
+end sub
+
+sub restoreFocus(label as string, itemIndex as integer)
+    for i = 0 to m.rowSpec.Count() - 1
+        if m.rowSpec[i].label = label
+            count = m.rowSpec[i].items.Count()
+            if count > 0
+                target = itemIndex
+                if target >= count then target = count - 1
+                m.rows.jumpToRowItem = [i, target]
+                return
+            end if
+            exit for
+        end if
+    end for
+    if m.rowSpec.Count() > 0 then m.rows.jumpToRowItem = [0, 0]
+end sub
+
+function favoriteKey(item as object) as string
+    if item.kind = "series" then return "series:" + Xtream.toStr(pick(item.raw, "series_id", ""))
+    return item.kind + ":" + Xtream.toStr(pick(item.raw, "stream_id", ""))
+end function

@@ -1,0 +1,181 @@
+import "pkg:/source/lib/Xtream.bs"
+import "pkg:/source/lib/Registry.bs"
+
+sub init()
+    m.title = m.top.findNode("title")
+    m.plot = m.top.findNode("plot")
+    m.seasonsList = m.top.findNode("seasons")
+    m.episodesList = m.top.findNode("episodes")
+
+    m.seasons = []        ' season numbers, in order
+    m.bySeason = {}       ' "1" -> [episode, ...]
+    m.episodes = []       ' the episodes currently listed
+
+    m.seasonsList.observeField("itemFocused", "onSeasonFocused")
+    m.episodesList.observeField("itemSelected", "onEpisodeSelected")
+    m.top.observeField("params", "onParams")
+    m.top.observeField("visible", "onVisibleChanged")
+    m.defaultFocus = m.episodesList
+end sub
+
+sub onParams()
+    m.title.text = pick(m.top.params, "title", "")
+    setLoading(true)
+    apiRequest("get_series_info", { series_id: m.top.params.seriesId }, "onSeriesInfo")
+end sub
+
+' Back from the player: redraw so the resume bars are current.
+sub onVisibleChanged()
+    if m.top.visible and m.episodes.Count() > 0 then showEpisodes(m.episodes)
+end sub
+
+sub onSeriesInfo(event as object)
+    setLoading(false)
+    res = event.getData()
+    if not res.ok
+        showError(res.error)
+        return
+    end if
+
+    m.plot.text = Xtream.toStr(pick(pick(res.data, "info", {}), "plot", ""))
+    groupBySeason(pick(res.data, "episodes", invalid))
+
+    content = CreateObject("roSGNode", "ContentNode")
+    for each season in m.seasons
+        item = content.createChild("ContentNode")
+        item.title = "Season " + season
+    end for
+    m.seasonsList.content = content
+
+    ' One season is not worth a tab column.
+    m.seasonsList.visible = (m.seasons.Count() > 1)
+    if m.seasons.Count() > 0 then showEpisodes(m.bySeason[m.seasons[0]])
+end sub
+
+' Xtream returns episodes either as { "1": [...] } keyed by season, or (some panels) as a flat array.
+sub groupBySeason(episodes as dynamic)
+    m.seasons = []
+    m.bySeason = {}
+    if episodes = invalid then return
+
+    if GetInterface(episodes, "ifArray") <> invalid
+        for each entry in episodes
+            if GetInterface(entry, "ifArray") <> invalid
+                for each ep in entry
+                    addEpisode(ep)
+                end for
+            else
+                addEpisode(entry)
+            end if
+        end for
+    else
+        for each key in episodes
+            list = episodes[key]
+            ' Some panels put a single episode object here instead of a list of them.
+            if GetInterface(list, "ifArray") <> invalid
+                for each ep in list
+                    addEpisode(ep)
+                end for
+            else
+                addEpisode(list)
+            end if
+        end for
+    end if
+
+    ' Season keys arrive as strings, so "10" must not sort before "2". Sort by the number but keep
+    ' the original spelling - it is what m.bySeason is keyed by ("01" would not match "1").
+    ranked = []
+    for each season in m.seasons
+        ranked.Push({ key: season, num: seasonNumber(season) })
+    end for
+    ranked.SortBy("num")
+
+    m.seasons = []
+    for each entry in ranked
+        m.seasons.Push(entry.key)
+    end for
+end sub
+
+sub addEpisode(ep as dynamic)
+    ' Anything that is not an object cannot be an episode - skip it rather than crash on it.
+    if ep = invalid or GetInterface(ep, "ifAssociativeArray") = invalid then return
+
+    season = Xtream.toStr(pick(ep, "season", "1"))
+    if season = "" then season = "1"
+    if not m.bySeason.DoesExist(season)
+        m.bySeason[season] = []
+        m.seasons.Push(season)
+    end if
+    m.bySeason[season].Push(ep)
+end sub
+
+' Season labels are usually "1", but a panel is free to send anything; non-numeric sorts first.
+function seasonNumber(season as string) as integer
+    for i = 1 to Len(season)
+        digit = Mid(season, i, 1)
+        if digit < "0" or digit > "9" then return 0
+    end for
+    return Val(season, 10)
+end function
+
+sub onSeasonFocused()
+    index = m.seasonsList.itemFocused
+    if index < 0 or index >= m.seasons.Count() then return
+    showEpisodes(m.bySeason[m.seasons[index]])
+end sub
+
+sub showEpisodes(episodes as dynamic)
+    if episodes = invalid or GetInterface(episodes, "ifArray") = invalid then episodes = []
+    m.episodes = episodes
+    content = CreateObject("roSGNode", "ContentNode")
+
+    for each ep in episodes
+        info = pick(ep, "info", {})
+        node = content.createChild("ContentNode")
+        node.addFields({ plotLine: "", progress: 0.0 })
+        node.title = "S" + Xtream.toStr(pick(ep, "season", "?")) + "E" + Xtream.toStr(pick(ep, "episode_num", "?")) + "  ·  " + Xtream.toStr(pick(ep, "title", ""))
+        node.plotLine = Xtream.toStr(pick(info, "plot", ""))
+        node.HDPOSTERURL = Xtream.toStr(pick(info, "movie_image", ""))
+
+        progress = Registry.readProgress("ep:" + Xtream.toStr(pick(ep, "id", "")))
+        if progress <> invalid and progress.duration > 0
+            node.progress = progress.position / progress.duration
+        end if
+    end for
+
+    m.episodesList.content = content
+end sub
+
+sub onEpisodeSelected()
+    index = m.episodesList.itemSelected
+    if index < 0 or index >= m.episodes.Count() then return
+    ep = m.episodes[index]
+
+    id = Xtream.toStr(pick(ep, "id", ""))
+    ext = Xtream.toStr(pick(ep, "container_extension", "mp4"))
+    progressId = "ep:" + id
+    startAt = 0
+    progress = Registry.readProgress(progressId)
+    if progress <> invalid then startAt = progress.position
+
+    navigateTo("PlayerScreen", {
+        url: Xtream.seriesStreamUrl(m.global.auth, id, ext)
+        title: m.title.text + " – " + Xtream.toStr(pick(ep, "title", ""))
+        streamFormat: Xtream.streamFormatForExt(ext)
+        isLive: false
+        progressId: progressId
+        startPosition: startAt
+    })
+end sub
+
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+    if key = "left" and m.episodesList.hasFocus() and m.seasonsList.visible
+        m.seasonsList.setFocus(true)
+        return true
+    else if key = "right" and m.seasonsList.hasFocus()
+        m.episodesList.setFocus(true)
+        return true
+    end if
+    return false
+end function

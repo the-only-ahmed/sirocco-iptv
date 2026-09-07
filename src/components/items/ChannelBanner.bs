@@ -1,0 +1,67 @@
+sub init()
+    m.body = m.top.findNode("body")
+    m.num = m.top.findNode("num")
+    m.name = m.top.findNode("name")
+    m.now = m.top.findNode("now")
+    m.next = m.top.findNode("next")
+    m.progressBg = m.top.findNode("progressBg")
+    m.progress = m.top.findNode("progress")
+    m.hideTimer = m.top.findNode("hideTimer")
+    m.hideTimer.observeField("fire", "onHideTimer")
+end sub
+
+sub onChannel()
+    channel = m.top.channel
+    if channel = invalid then return
+    m.num.text = asText(channel["num"])
+    m.name.text = asText(channel["name"])
+    clearEpg()
+    show()
+end sub
+
+' The EPG lands a moment after the zap, while the banner is still up.
+sub onEpg()
+    epg = m.top.epg
+    if epg = invalid then return
+    m.now.text = asText(epg["time"]) + "  " + asText(epg["nowTitle"])
+    m.next.text = asText(epg["nextTitle"])
+    progress = epg["progress"]
+    if progress = invalid then progress = 0
+    m.progress.width = m.progressBg.width * progress
+    if m.body.visible then show() ' keep it up a full period once the detail arrives
+end sub
+
+sub onMessage()
+    if m.top.message = "" then return
+    m.num.text = ""
+    m.name.text = m.top.message
+    clearEpg()
+    show()
+end sub
+
+sub show()
+    m.body.visible = true
+    m.hideTimer.control = "stop"
+    m.hideTimer.control = "start"
+end sub
+
+sub hide()
+    m.body.visible = false
+    m.hideTimer.control = "stop"
+end sub
+
+sub onHideTimer()
+    m.body.visible = false
+end sub
+
+sub clearEpg()
+    m.now.text = ""
+    m.next.text = ""
+    m.progress.width = 0
+end sub
+
+function asText(value as dynamic) as string
+    if value = invalid then return ""
+    if GetInterface(value, "ifString") <> invalid then return value
+    return ""
+end function

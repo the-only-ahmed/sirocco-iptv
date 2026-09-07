@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- params: { seriesId: string|int, title: string } -->
+<component name="SeriesScreen" extends="BaseScreen">
+  <children>
+    <Label id="title" text="" translation="[120, 70]" font="font:LargeBoldSystemFont" color="#FFFFFF" />
+    <Label id="plot" text="" translation="[120, 140]" width="1680" height="80" wrap="true" maxLines="3"
+           font="font:SmallestSystemFont" color="#8A93A6" />
+
+    <!-- Season tabs; hidden when the series has only one season -->
+    <LabelList id="seasons" translation="[120, 250]" itemSize="[220, 56]" numRows="10"
+               color="#8A93A6" focusedColor="#FFFFFF" />
+
+    <MarkupList id="episodes" translation="[380, 250]" itemSize="[1420, 120]" numRows="6"
+                itemComponentName="EpisodeItem" drawFocusFeedback="true" />
+  </children>
+  <script type="text/brighterscript" uri="SeriesScreen.bs" />
+</component>

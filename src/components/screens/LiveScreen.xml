@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Live TV: categories | channels | now-next. params: {} -->
+<component name="LiveScreen" extends="BaseScreen">
+  <children>
+    <Label id="title" text="Live TV" translation="[120, 60]" font="font:LargeBoldSystemFont" color="#FFFFFF" />
+
+    <!-- pane 1: categories -->
+    <LabelList id="categories" translation="[120, 150]" itemSize="[360, 52]" numRows="14"
+               color="#8A93A6" focusedColor="#FFFFFF" />
+
+    <!-- pane 2: channels -->
+    <MarkupList id="channels" translation="[510, 150]" itemSize="[620, 72]" numRows="10"
+                itemComponentName="ChannelItem" drawFocusFeedback="true" />
+
+    <!-- pane 3: now / next for the focused channel -->
+    <EpgPanel id="info" translation="[1180, 150]" />
+
+    <!-- catch-up programmes for the focused channel (tv_archive = 1) -->
+    <CatchupOverlay id="catchup" translation="[510, 150]" />
+
+    <!-- 300 ms debounce so scrolling the channel list does not fire an EPG request per row -->
+    <Timer id="epgTimer" repeat="false" duration="0.3" />
+    <!-- Channels are added in slices; building the whole panel at once froze the screen -->
+    <Timer id="buildTimer" repeat="false" duration="0.05" />
+  </children>
+  <script type="text/brighterscript" uri="LiveScreen.bs" />
+</component>

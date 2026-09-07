@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Channel number the viewer is typing on the remote.
+    digit         = "7"   push one digit; the overlay shows and the 2 s timer restarts
+    channelNumber = "127" set once typing settles - observe this to jump
+-->
+<component name="ChannelNumberEntry" extends="Group">
+  <interface>
+    <field id="digit" type="string" alwaysNotify="true" onChange="onDigit" />
+    <field id="channelNumber" type="string" alwaysNotify="true" />
+  </interface>
+  <children>
+    <Group id="body" visible="false">
+      <Rectangle width="240" height="120" color="#0B0F19" opacity="0.85" />
+      <Label id="label" width="240" height="120" horizAlign="center" vertAlign="center"
+             font="font:LargeBoldSystemFont" color="#FFFFFF" />
+    </Group>
+    <Timer id="timer" repeat="false" duration="2" />
+  </children>
+  <script type="text/brighterscript" uri="ChannelNumberEntry.bs" />
+</component>

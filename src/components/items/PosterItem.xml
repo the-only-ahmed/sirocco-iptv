@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MarkupGrid cell: poster + title. Reads itemContent.HDPOSTERURL / itemContent.title -->
+<component name="PosterItem" extends="Group">
+  <interface>
+    <field id="itemContent" type="node" onChange="onContentChanged" />
+  </interface>
+  <children>
+    <Rectangle id="bg" width="220" height="300" color="#151B2B" translation="[10, 0]" />
+    <Poster id="poster" width="220" height="300" translation="[10, 0]"
+            loadDisplayMode="scaleToFit" loadWidth="220" loadHeight="300"
+            failedBitmapUri="pkg:/images/placeholder.png" />
+    <Label id="label" width="220" height="60" translation="[10, 306]"
+           horizAlign="center" wrap="true" maxLines="2"
+           font="font:SmallestSystemFont" color="#D5DAE5" />
+  </children>
+  <script type="text/brighterscript" uri="PosterItem.bs" />
+</component>

@@ -1,0 +1,38 @@
+sub init()
+    m.bg = m.top.findNode("bg")
+    m.num = m.top.findNode("num")
+    m.logo = m.top.findNode("logo")
+    m.name = m.top.findNode("name")
+    m.now = m.top.findNode("now")
+    m.watched = invalid
+end sub
+
+sub onContentChanged()
+    ' Rows are recycled: drop the observer on the node this row used to render.
+    if m.watched <> invalid
+        m.watched.unobserveField("nowTitle")
+        m.watched = invalid
+    end if
+
+    content = m.top.itemContent
+    if content = invalid then return
+
+    m.num.text = content.num
+    m.name.text = content.title
+    m.now.text = content.nowTitle
+    uri = content.HDPOSTERURL
+    if uri = "" then uri = "pkg:/images/placeholder.png"
+    m.logo.uri = uri
+
+    ' The EPG lands after the row is drawn, so follow the field rather than the node reference.
+    content.observeField("nowTitle", "onNowTitleChanged")
+    m.watched = content
+end sub
+
+sub onNowTitleChanged()
+    if m.watched <> invalid then m.now.text = m.watched.nowTitle
+end sub
+
+sub onFocusChanged()
+    m.bg.opacity = m.top.focusPercent
+end sub

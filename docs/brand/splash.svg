@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="2000" viewBox="0 0 2000 2000">
+  <defs>
+    <linearGradient id="w" x1="0" y1="0" x2="1" y2="0.25">
+      <stop offset="0" stop-color="#F7D98C"/><stop offset="0.5" stop-color="#EFA84C"/><stop offset="1" stop-color="#D0552A"/>
+    </linearGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#0B0F19"/><stop offset="1" stop-color="#131020"/>
+    </linearGradient>
+  </defs>
+  <rect width="2000" height="2000" fill="url(#bg)"/>
+  <g transform="translate(1000,780) scale(1.85) translate(-300,-300)">
+    <g fill="none" stroke="url(#w)" stroke-width="26" stroke-linecap="round">
+      <path d="M150 230 H360 a34 34 0 1 0 -34 -34"/>
+      <path d="M150 300 H430 a30 30 0 1 1 -30 30"/>
+      <path d="M150 370 H330 a26 26 0 1 1 -26 26"/>
+    </g>
+  </g>
+  <text x="1000" y="1250" text-anchor="middle" fill="url(#w)"
+        font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="150" font-weight="700"
+        letter-spacing="26">SIROCCO</text>
+  <text x="1000" y="1338" text-anchor="middle" fill="#8A93A6"
+        font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="58" font-weight="500"
+        letter-spacing="20">IPTV</text>
+</svg>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Audio / subtitle chooser. Owns its dialog; draws nothing itself.
+    tracks    = { audio, subtitles, currentAudio, currentSubtitle }   setting it opens the dialog
+    selection = { kind: "audio" | "subtitles" | "subtitlesOff" | "none", id }
+-->
+<component name="TrackPicker" extends="Group">
+  <interface>
+    <field id="tracks" type="assocarray" alwaysNotify="true" onChange="onTracks" />
+    <field id="selection" type="assocarray" alwaysNotify="true" />
+  </interface>
+  <script type="text/brighterscript" uri="TrackPicker.bs" />
+</component>

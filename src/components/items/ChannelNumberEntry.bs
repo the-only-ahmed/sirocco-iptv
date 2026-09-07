@@ -1,0 +1,28 @@
+' Longest channel number we accept before starting over.
+const MAX_DIGITS = 4
+
+sub init()
+    m.body = m.top.findNode("body")
+    m.label = m.top.findNode("label")
+    m.timer = m.top.findNode("timer")
+    m.entry = ""
+    m.timer.observeField("fire", "onTimer")
+end sub
+
+sub onDigit()
+    if m.top.digit = "" then return
+    if Len(m.entry) >= MAX_DIGITS then m.entry = ""
+    m.entry += m.top.digit
+    m.label.text = m.entry
+    m.body.visible = true
+    m.timer.control = "stop"
+    m.timer.control = "start"
+end sub
+
+' Typing has settled: hand the number over and clear the overlay.
+sub onTimer()
+    entered = m.entry
+    m.entry = ""
+    m.body.visible = false
+    if entered <> "" then m.top.channelNumber = entered
+end sub

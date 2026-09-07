@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="LoginScreen" extends="BaseScreen">
+  <children>
+    <Label id="title" text="Sirocco IPTV" translation="[120, 100]" font="font:LargeBoldSystemFont" color="#FFFFFF" />
+    <Label id="subtitle" text="" translation="[120, 175]" font="font:MediumSystemFont" color="#8A93A6" />
+
+    <!-- Saved servers; shown instead of the form once there is at least one -->
+    <LabelList id="profiles" visible="false" translation="[120, 270]" itemSize="[900, 72]" numRows="8"
+               color="#D5DAE5" focusedColor="#FFFFFF" />
+
+    <ButtonGroup id="buttons" visible="false" translation="[120, 270]" minWidth="820" />
+
+    <Label id="hint" text="" translation="[120, 900]" width="1680"
+           font="font:SmallestSystemFont" color="#5C6577" />
+  </children>
+  <script type="text/brighterscript" uri="LoginScreen.bs" />
+</component>

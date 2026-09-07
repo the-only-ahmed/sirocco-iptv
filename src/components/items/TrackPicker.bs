@@ -1,0 +1,100 @@
+sub init()
+    m.actions = []
+    m.dialog = invalid
+end sub
+
+sub onTracks()
+    tracks = m.top.tracks
+    if tracks = invalid then return
+
+    audio = tracks.audio
+    subtitles = tracks.subtitles
+    audioCount = 0
+    subtitleCount = 0
+    if audio <> invalid then audioCount = audio.Count()
+    if subtitles <> invalid then subtitleCount = subtitles.Count()
+
+    if audioCount < 2 and subtitleCount = 0
+        m.actions = []
+        show("Audio & subtitles", "This stream has no alternate audio or subtitle tracks.", ["OK"])
+        return
+    end if
+
+    buttons = []
+    m.actions = []
+
+    if audioCount > 1
+        current = asText(tracks.currentAudio)
+        for each track in audio
+            id = asText(track["Track"])
+            buttons.Push(marker(id, current) + "Audio: " + label(track, ["Name", "Language", "Track"]))
+            m.actions.Push({ kind: "audio", id: id })
+        end for
+    end if
+
+    if subtitleCount > 0
+        current = asText(tracks.currentSubtitle)
+        buttons.Push(marker("", current) + "Subtitles: Off")
+        m.actions.Push({ kind: "subtitlesOff", id: "" })
+
+        for each track in subtitles
+            id = asText(track["TrackName"])
+            buttons.Push(marker(id, current) + "Subtitles: " + label(track, ["Description", "Language", "TrackName"]))
+            m.actions.Push({ kind: "subtitles", id: id })
+        end for
+    end if
+
+    show("Audio & subtitles", "", buttons)
+end sub
+
+sub show(title as string, message as string, buttons as object)
+    dialog = CreateObject("roSGNode", "Dialog")
+    dialog.title = title
+    if message <> "" then dialog.message = message
+    dialog.buttons = buttons
+    dialog.observeField("buttonSelected", "onButton")
+    dialog.observeField("wasClosed", "onClosed")
+    m.dialog = dialog
+    m.top.getScene().dialog = dialog
+end sub
+
+sub onButton()
+    if m.dialog = invalid then return
+    index = m.dialog.buttonSelected
+    chosen = { kind: "none", id: "" }
+    if index >= 0 and index < m.actions.Count() then chosen = m.actions[index]
+    close()
+    m.top.selection = chosen
+end sub
+
+' Dismissed with Back: still report, so the screen can take its focus back.
+sub onClosed()
+    if m.dialog = invalid then return
+    close()
+    m.top.selection = { kind: "none", id: "" }
+end sub
+
+sub close()
+    scene = m.top.getScene()
+    if scene <> invalid then scene.dialog = invalid
+    m.dialog = invalid
+end sub
+
+function marker(id as string, current as string) as string
+    if id = current then return " > "
+    return "   "
+end function
+
+' First non-empty of `keys`, e.g. Name -> Language -> Track.
+function label(track as object, keys as object) as string
+    for each key in keys
+        value = asText(track[key])
+        if value <> "" then return value
+    end for
+    return "Unknown"
+end function
+
+function asText(value as dynamic) as string
+    if value = invalid or GetInterface(value, "ifString") = invalid then return ""
+    return value
+end function

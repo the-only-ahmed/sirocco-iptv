@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="HomeScreen" extends="BaseScreen">
+  <children>
+    <NavRail id="rail" translation="[120, 140]" />
+
+    <Label id="heading" text="Sirocco IPTV" translation="[440, 60]"
+           font="font:LargeBoldSystemFont" color="#FFFFFF" />
+    <Label id="account" text="" translation="[440, 985]"
+           font="font:SmallestSystemFont" color="#8A93A6" />
+
+    <RowList id="rows" translation="[440, 150]"
+             itemComponentName="RowItem"
+             itemSize="[1360, 430]" rowItemSize="[[220, 370]]"
+             numRows="2" rowItemSpacing="[[24, 0]]" itemSpacing="[0, 30]"
+             showRowLabel="[true, true, true]" rowLabelOffset="[[0, 8]]"
+             focusXOffset="[0]" drawFocusFeedback="false" />
+
+    <!-- Placeholder tiles while the three lists load; built in code, see buildSkeleton() -->
+    <Group id="skeleton" translation="[440, 190]" />
+  </children>
+  <script type="text/brighterscript" uri="HomeScreen.bs" />
+</component>

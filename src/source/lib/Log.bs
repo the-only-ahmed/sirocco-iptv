@@ -1,0 +1,16 @@
+' Tiny logger. Output shows in the telnet console (port 8085) / VS Code debug console.
+namespace Log
+    sub info(tag as string, msg as dynamic)
+        #if DEBUG
+            print "[" + tag + "] "; msg
+        #else
+            ' Release strips the body above, which would leave both parameters unused and bslint
+            ' complaining. This emits nothing and keeps the signature honest.
+            if false then print tag; msg
+        #end if
+    end sub
+
+    sub error(tag as string, msg as dynamic)
+        print "[" + tag + "] ERROR: "; msg
+    end sub
+end namespace

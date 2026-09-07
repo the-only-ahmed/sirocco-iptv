@@ -1,0 +1,114 @@
+import "pkg:/source/lib/Xtream.bs"
+import "pkg:/source/lib/Registry.bs"
+
+sub init()
+    m.title = m.top.findNode("title")
+    m.list = m.top.findNode("list")
+    m.categories = []
+    m.pendingCategory = invalid
+    m.lockIndex = 0
+    m.list.observeField("itemSelected", "onItemSelected")
+    m.top.observeField("params", "onParams")
+    m.top.observeField("pinPassed", "onPinPassed")
+    m.defaultFocus = m.list
+end sub
+
+sub onParams()
+    p = m.top.params
+    m.title.text = pick(p, "title", "Categories")
+
+    actions = { live: "get_live_categories", vod: "get_vod_categories", series: "get_series_categories" }
+    setLoading(true)
+    apiRequest(actions[p.type], {}, "onCategories")
+end sub
+
+sub onCategories(event as object)
+    setLoading(false)
+    res = event.getData()
+    if not res.ok
+        showError(res.error)
+        return
+    end if
+
+    m.categories = res.data
+    ' Synthetic "All" entry - Xtream returns everything when category_id is omitted
+    m.categories.Unshift({ category_id: "", category_name: "All" })
+    buildList()
+end sub
+
+' Locked categories are marked so the PIN prompt is never a surprise.
+sub buildList()
+    content = CreateObject("roSGNode", "ContentNode")
+    for each cat in m.categories
+        item = content.createChild("ContentNode")
+        name = pick(cat, "category_name", "Untitled")
+        if isLockedCategory(categoryKey(cat), name) then name += "   (locked)"
+        item.title = name
+    end for
+    m.list.content = content
+end sub
+
+function categoryKey(cat as object) as string
+    return m.top.params.type + ":" + Xtream.toStr(pick(cat, "category_id", ""))
+end function
+
+sub onItemSelected()
+    index = m.list.itemSelected
+    if index < 0 or index >= m.categories.Count() then return
+    cat = m.categories[index]
+
+    if isLockedCategory(categoryKey(cat), pick(cat, "category_name", ""))
+        m.pendingCategory = cat
+        requirePin()
+        return
+    end if
+    openCategory(cat)
+end sub
+
+sub onPinPassed()
+    cat = m.pendingCategory
+    m.pendingCategory = invalid
+    if cat <> invalid then openCategory(cat)
+end sub
+
+sub openCategory(cat as object)
+    navigateTo("GridScreen", {
+        type: m.top.params.type
+        categoryId: pick(cat, "category_id", "")
+        title: pick(cat, "category_name", "")
+    })
+end sub
+
+' * on a category locks or unlocks it by hand. "All" cannot be locked - lock the categories instead.
+sub toggleLock()
+    index = m.list.itemFocused
+    if index < 0 or index >= m.categories.Count() then return
+    cat = m.categories[index]
+    name = pick(cat, "category_name", "")
+    if Xtream.toStr(pick(cat, "category_id", "")) = ""
+        showToast("Lock individual categories rather than All")
+        return
+    end if
+    if Xtream.isAdultName(name)
+        showToast(name + " is always locked")
+        return
+    end if
+
+    m.lockIndex = index
+    requestLockToggle(categoryKey(cat), name)
+end sub
+
+' Overrides BaseScreen: redraw the list once a lock has changed.
+sub onLockChanged()
+    buildList()
+    m.list.jumpToItem = m.lockIndex
+end sub
+
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+    if key = "options"
+        toggleLock()
+        return true
+    end if
+    return false
+end function

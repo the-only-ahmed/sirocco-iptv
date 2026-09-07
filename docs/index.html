@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sirocco IPTV — a player for your own IPTV subscription, on Roku</title>
+<meta name="description" content="Sirocco IPTV turns your Roku into a clean, fast player for the Xtream Codes IPTV service you already subscribe to. No content included, no ads, no tracking.">
+<style>
+  :root { --bg:#0B0F19; --panel:#151B2B; --text:#FFFFFF; --muted:#8A93A6; --accent:#6366F1; --line:#232B3E; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:56px 24px 64px; }
+  header { display:flex; align-items:center; gap:18px; margin-bottom:36px; }
+  header svg { width:64px; height:64px; flex:none; }
+  h1 { font-size:34px; line-height:1.15; margin:0; }
+  .tag { color:var(--muted); margin:4px 0 0; }
+  h2 { font-size:22px; margin:40px 0 12px; }
+  p { margin:0 0 16px; }
+  ul { padding-left:22px; margin:0 0 16px; }
+  li { margin-bottom:8px; }
+  a { color:#A5A7FF; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:22px 24px; margin:28px 0; }
+  .card h2 { margin-top:0; }
+  code { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:2px 7px; font-size:15px; }
+  .note { color:var(--muted); font-size:15px; }
+  footer { margin-top:56px; padding-top:20px; border-top:1px solid var(--line); color:var(--muted); font-size:15px; }
+  footer a { margin-right:18px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <svg viewBox="0 0 600 600" aria-hidden="true">
+      <defs><linearGradient id="w" x1="0" y1="0" x2="1" y2="0.25">
+        <stop offset="0" stop-color="#F7D98C"/><stop offset="0.5" stop-color="#EFA84C"/><stop offset="1" stop-color="#D0552A"/>
+      </linearGradient></defs>
+      <g fill="none" stroke="url(#w)" stroke-width="26" stroke-linecap="round">
+        <path d="M150 230 H360 a34 34 0 1 0 -34 -34"/>
+        <path d="M150 300 H430 a30 30 0 1 1 -30 30"/>
+        <path d="M150 370 H330 a26 26 0 1 1 -26 26"/>
+      </g>
+    </svg>
+    <div>
+      <h1>Sirocco IPTV</h1>
+      <p class="tag">A player for your own IPTV subscription, on Roku.</p>
+    </div>
+  </header>
+
+  <p>Sirocco IPTV turns your Roku into a clean, fast player for the IPTV service you already subscribe to. Enter your provider's server, username and password — or paste your M3U link — and you're in.</p>
+
+  <ul>
+    <li><strong>Live TV</strong> with categories, channel numbers you can type on the remote, and now/next programme info when your provider supplies it</li>
+    <li><strong>Movies and series</strong> with detail pages, season lists, and resume where you left off</li>
+    <li><strong>Favorites</strong> across live, movies and series, with their own row on Home</li>
+    <li><strong>Search</strong> your whole catalogue</li>
+    <li><strong>Parental control</strong> — lock any category behind a PIN</li>
+    <li><strong>Multiple providers</strong>, saved and switched with one click</li>
+    <li><strong>Catch-up</strong> for channels whose provider offers an archive</li>
+  </ul>
+
+  <div class="card">
+    <h2>Install</h2>
+    <p>Sirocco IPTV is currently distributed as a Roku beta app. Add it to your Roku account with the access code, then it appears on your device after a restart or a manual update check.</p>
+    <p><a href="https://my.roku.com/account/add/SIROCCO">my.roku.com/account/add/SIROCCO</a> &nbsp;·&nbsp; access code <code>SIROCCO</code></p>
+  </div>
+
+  <h2>What you need</h2>
+  <p>An active subscription with an Xtream Codes–compatible IPTV provider. Sirocco IPTV does not include any channels or content; it only plays what your provider gives you. We have no relationship with any provider.</p>
+
+  <h2>What we don't do</h2>
+  <p>No ads. No accounts with us. No tracking. Your credentials are stored on your Roku and sent only to the server you configured. Details in the <a href="privacy.html">privacy policy</a>.</p>
+
+  <h2>Support</h2>
+  <p>Something not working? Write to <a href="mailto:ahmed@goliaths.io">ahmed@goliaths.io</a>. Include your Roku model and, if it's a playback problem, the name of the channel or title.</p>
+  <p class="note">Most playback failures are the provider's stream rather than the app: a channel that has gone offline, or a file in a format Roku cannot decode (AVI, DTS audio, MPEG-2 video). The app hides what it has found to be unavailable and tells you when a format is unsupported.</p>
+
+  <footer>
+    <a href="privacy.html">Privacy policy</a>
+    <a href="terms.html">Terms of use</a>
+    <span>© 2026 Ahmed El Kadhi</span>
+  </footer>
+</main>
+</body>
+</html>

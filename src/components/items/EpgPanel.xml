@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Now/next pane for the focused live channel.
+    channelName = "FR-TF1 HD"
+    hint        = "Press * for catch-up"
+    epg         = Xtream.nowNext(listings)   render now/next/progress; an empty map clears
+    notice      = "No programme information" a stand-in line when there is nothing to render
+-->
+<component name="EpgPanel" extends="Group">
+  <interface>
+    <field id="channelName" type="string" alwaysNotify="true" onChange="onChannelName" />
+    <field id="hint" type="string" alwaysNotify="true" onChange="onHint" />
+    <field id="epg" type="assocarray" alwaysNotify="true" onChange="onEpg" />
+    <field id="notice" type="string" alwaysNotify="true" onChange="onNotice" />
+  </interface>
+  <children>
+    <Label id="name" width="620" height="40" font="font:MediumBoldSystemFont" color="#FFFFFF" />
+    <Label id="time" translation="[0, 56]" width="620" height="26"
+           font="font:SmallestSystemFont" color="#6366F1" />
+    <Label id="now" translation="[0, 84]" width="620" height="70" wrap="true" maxLines="2"
+           font="font:MediumSystemFont" color="#FFFFFF" />
+    <Rectangle id="progressBg" translation="[0, 162]" width="620" height="6" color="#151B2B" />
+    <Rectangle id="progress" translation="[0, 162]" width="0" height="6" color="#6366F1" />
+    <Label id="nextLabel" translation="[0, 190]" width="620" height="26" text=""
+           font="font:SmallestSystemFont" color="#8A93A6" />
+    <Label id="next" translation="[0, 216]" width="620" height="70" wrap="true" maxLines="2"
+           font="font:SmallSystemFont" color="#D5DAE5" />
+    <Label id="hint" translation="[0, 300]" width="620" height="26" text=""
+           font="font:SmallestSystemFont" color="#8A93A6" />
+  </children>
+  <script type="text/brighterscript" uri="EpgPanel.bs" />
+</component>

@@ -1,0 +1,13 @@
+sub init()
+    m.poster = m.top.findNode("poster")
+    m.label = m.top.findNode("label")
+end sub
+
+sub onContentChanged()
+    content = m.top.itemContent
+    if content = invalid then return
+    m.label.text = content.title
+    uri = content.HDPOSTERURL
+    if uri = "" then uri = "pkg:/images/placeholder.png"
+    m.poster.uri = uri
+end sub

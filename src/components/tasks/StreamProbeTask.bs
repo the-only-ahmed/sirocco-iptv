@@ -1,0 +1,90 @@
+import "pkg:/source/lib/Xtream.bs"
+import "pkg:/source/lib/Log.bs"
+
+' A live .m3u8 is a few hundred bytes; anything slower than this is not worth waiting for.
+const PROBE_TIMEOUT_MS = 4000
+' Breather between probes so a sweep never looks like a hammering client.
+const PROBE_GAP_MS = 250
+
+sub init()
+    m.top.functionName = "execute"
+end sub
+
+sub execute()
+    targets = m.top.targets
+    if targets = invalid or targets.Count() = 0
+        m.top.dead = []
+        return
+    end if
+
+    Log.info("StreamProbeTask", "checking " + targets.Count().ToStr() + " channels")
+    dead = []
+    checked = 0
+
+    ranged = (UCase(m.top.method) = "RANGE")
+    seen = {}
+    for each target in targets
+        code = probe(Xtream.toStr(target.url), ranged)
+        ' Only a definitive rejection counts. A timeout or a 5xx may just be a busy server.
+        if Xtream.isFatalHttpCode(code) then dead.Push(Xtream.toStr(target.streamId))
+        tally(seen, code)
+        checked += 1
+        m.top.progress = checked
+        sleep(PROBE_GAP_MS)
+    end for
+    Log.info("StreamProbeTask", "codes " + summarise(seen))
+
+    ' A line at its connection limit can answer 403 to everything - and on this panel 403 is also
+    ' what a dead channel returns. If nearly the whole sweep looks dead, distrust the sweep, not the
+    ' channels: hiding a whole category on a bad guess is far worse than checking again later.
+    if dead.Count() > targets.Count() * 0.9
+        Log.error("StreamProbeTask", "discarding sweep: " + dead.Count().ToStr() + " of " + targets.Count().ToStr() + " looked dead")
+        m.top.dead = []
+        return
+    end if
+
+    Log.info("StreamProbeTask", "done, " + dead.Count().ToStr() + " dead")
+    m.top.dead = dead
+end sub
+
+' Returns the HTTP status, or 0 when the request never got that far.
+function probe(url as string, ranged as boolean) as integer
+    xfer = CreateObject("roUrlTransfer")
+    xfer.SetUrl(url)
+    xfer.SetCertificatesFile("common:/certs/ca-bundle.crt")
+    xfer.InitClientCertificates()
+    xfer.RetainBodyOnError(true)
+    xfer.AddHeader("User-Agent", Xtream.userAgent())
+
+    ' A movie is gigabytes: ask for the first kilobyte rather than HEAD, which plenty of panels
+    ' answer with 405 or a blanket 200 that tells us nothing.
+    if ranged then xfer.AddHeader("Range", "bytes=0-1023")
+
+    port = CreateObject("roMessagePort")
+    xfer.SetMessagePort(port)
+    if not xfer.AsyncGetToString() then return 0
+
+    msg = wait(PROBE_TIMEOUT_MS, port)
+    if msg = invalid
+        xfer.AsyncCancel()
+        return 0
+    end if
+    if type(msg) <> "roUrlEvent" then return 0
+    return msg.GetResponseCode()
+end function
+
+' What the panel actually answered, so a sweep that hides nothing can be explained from the console.
+sub tally(seen as object, code as integer)
+    key = code.ToStr()
+    if seen[key] = invalid then seen[key] = 0
+    seen[key] += 1
+end sub
+
+function summarise(seen as object) as string
+    out = ""
+    for each key in seen
+        if out <> "" then out += " "
+        out += key + "x" + seen[key].ToStr()
+    end for
+    return out
+end function

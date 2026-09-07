@@ -1,0 +1,387 @@
+' Xtream Codes API helpers. Pure functions - safe to import from any thread.
+'
+' auth = { baseUrl: "http://host:port", username: "u", password: "p" }
+namespace Xtream
+
+    ' Sent on API calls and stream requests. Panels often 403 unknown agents (Roku's default is "Roku/DVP-…").
+    const USER_AGENT = "VLC/3.0.20 LibVLC/3.0.20"
+
+    ' Registry section holding user-tweakable settings (Phase 9 gives it a UI).
+    const SECTION_SETTINGS = "settings"
+
+    ' The User-Agent to send on every API call and stream request: the stored override, else USER_AGENT.
+    ' Not a pure function (reads the registry) but safe on any thread - roRegistrySection is not a network object.
+    function userAgent() as string
+        sec = CreateObject("roRegistrySection", Xtream.SECTION_SETTINGS)
+        if sec.Exists("userAgent")
+            ua = sec.Read("userAgent").Trim()
+            if ua <> "" then return ua
+        end if
+        return Xtream.USER_AGENT
+    end function
+
+    ' Stores the User-Agent override. Empty string restores the default.
+    sub setUserAgent(ua as string)
+        sec = CreateObject("roRegistrySection", Xtream.SECTION_SETTINGS)
+        if ua.Trim() = ""
+            sec.Delete("userAgent")
+        else
+            sec.Write("userAgent", ua.Trim())
+        end if
+        sec.Flush()
+    end sub
+
+    ' player_api.php URL. action = "" returns { user_info, server_info }.
+    function apiUrl(auth as object, action as string, params = {} as object) as string
+        url = auth.baseUrl + "/player_api.php?username=" + Xtream.encode(auth.username) + "&password=" + Xtream.encode(auth.password)
+        if action <> "" then url += "&action=" + action
+        for each key in params
+            url += "&" + key + "=" + Xtream.encode(Xtream.toStr(params[key]))
+        end for
+        return url
+    end function
+
+    ' Full XMLTV EPG for the account.
+    function epgUrl(auth as object) as string
+        return auth.baseUrl + "/xmltv.php?username=" + Xtream.encode(auth.username) + "&password=" + Xtream.encode(auth.password)
+    end function
+
+    ' Streams are served from server_info.url:port (may differ from the host the user typed).
+    ' Falls back to baseUrl when the login response had no server_info.
+    function streamBase(auth as object) as string
+        if auth.streamBaseUrl <> invalid and auth.streamBaseUrl <> "" then return auth.streamBaseUrl
+        return auth.baseUrl
+    end function
+
+    ' Builds "http://host:port" from the login response's server_info block.
+    function streamBaseFromServerInfo(serverInfo as object, fallback as string) as string
+        if serverInfo = invalid then return fallback
+        host = Xtream.toStr(serverInfo.url)
+        if host = "" then return fallback
+        protocol = LCase(Xtream.toStr(serverInfo.server_protocol))
+        if protocol <> "https" then protocol = "http"
+        port = Xtream.toStr(serverInfo.port)
+        if protocol = "https" and Xtream.toStr(serverInfo.https_port) <> "" then port = Xtream.toStr(serverInfo.https_port)
+        url = protocol + "://" + host
+        if port <> "" then url += ":" + port
+        return url
+    end function
+
+    ' Live channel. Always prefer m3u8 (HLS) on Roku - raw .ts is not supported by the Video node.
+    function liveStreamUrl(auth as object, streamId as dynamic, ext = "m3u8" as string) as string
+        return Xtream.streamBase(auth) + "/live/" + Xtream.encode(auth.username) + "/" + Xtream.encode(auth.password) + "/" + Xtream.toStr(streamId) + "." + ext
+    end function
+
+    function vodStreamUrl(auth as object, streamId as dynamic, ext as string) as string
+        return Xtream.streamBase(auth) + "/movie/" + Xtream.encode(auth.username) + "/" + Xtream.encode(auth.password) + "/" + Xtream.toStr(streamId) + "." + ext
+    end function
+
+    function seriesStreamUrl(auth as object, episodeId as dynamic, ext as string) as string
+        return Xtream.streamBase(auth) + "/series/" + Xtream.encode(auth.username) + "/" + Xtream.encode(auth.password) + "/" + Xtream.toStr(episodeId) + "." + ext
+    end function
+
+    ' ---------- catch-up (tv_archive = 1) ----------
+
+    ' EPG "2026-09-05 14:30:00" -> "2026-09-05:14-30", the stamp timeshift URLs expect.
+    ' Uses the panel's own EPG string so there is no timezone maths to get wrong.
+    function timeshiftStamp(epgStart as dynamic) as string
+        s = Xtream.toStr(epgStart).Trim()
+        if Len(s) < 16 then return ""
+        return Left(s, 10) + ":" + Mid(s, 12, 2) + "-" + Mid(s, 15, 2)
+    end function
+
+    ' HLS form - preferred, because Roku cannot play the raw MPEG-TS that timeshift.php returns.
+    function catchupHlsUrl(auth as object, streamId as dynamic, stamp as string, durationMinutes as integer) as string
+        return Xtream.streamBase(auth) + "/timeshift/" + Xtream.encode(auth.username) + "/" + Xtream.encode(auth.password) + "/" + durationMinutes.ToStr() + "/" + stamp + "/" + Xtream.toStr(streamId) + ".m3u8"
+    end function
+
+    ' Documented Xtream form. Kept as the fallback if a panel does not serve /timeshift/*.m3u8.
+    function catchupUrl(auth as object, streamId as dynamic, stamp as string, durationMinutes as integer) as string
+        return Xtream.streamBase(auth) + "/streaming/timeshift.php?username=" + Xtream.encode(auth.username) + "&password=" + Xtream.encode(auth.password) + "&stream=" + Xtream.toStr(streamId) + "&start=" + stamp + "&duration=" + durationMinutes.ToStr()
+    end function
+
+    ' Containers the Video node can actually open. Panels serve AVI/FLV/WMV/MPEG-PS happily (HTTP 206)
+    ' and they then fail at the demuxer with "no playable tracks", so filter them before they are shown.
+    ' An empty extension is treated as playable: unknown is not the same as unsupported.
+    function isPlayableExt(ext as dynamic) as boolean
+        e = LCase(Xtream.toStr(ext).Trim())
+        if e = "" then return true
+        return e = "mp4" or e = "m4v" or e = "mov" or e = "mkv" or e = "webm" or e = "m3u8" or e = "mpd"
+    end function
+
+    ' Categories that should sit behind the parental PIN by name alone.
+    function isAdultName(name as dynamic) as boolean
+        lower = LCase(Xtream.toStr(name))
+        for each word in ["adult", "xxx", "porn", "18+", "erotic"]
+            if Instr(1, lower, word) > 0 then return true
+        end for
+        return false
+    end function
+
+    ' Maps a container extension to the Video node's streamFormat.
+    function streamFormatForExt(ext as string) as string
+        e = LCase(ext)
+        if e = "m3u8" then return "hls"
+        if e = "mpd" then return "dash"
+        if e = "mkv" then return "mkv"
+        if e = "mp4" or e = "m4v" or e = "mov" then return "mp4"
+        ' Unknown / ts / avi: let the player sniff it (often fails - see CLAUDE.md gotchas)
+        return "mp4"
+    end function
+
+    ' ---------- EPG formatting ----------
+
+    ' "2026-09-05 14:30:00" -> "14:30"
+    function epgClock(value as dynamic) as string
+        s = Xtream.toStr(value)
+        if Len(s) < 16 then return ""
+        return Mid(s, 12, 5)
+    end function
+
+    ' get_short_epg listings -> ready-to-draw lines. Shared by the Live pane and the player banner.
+    function nowNext(listings as object) as object
+        out = { time: "", nowTitle: "", nextTitle: "", progress: 0.0 }
+        if listings = invalid or listings.Count() = 0 then return out
+
+        current = listings[0]
+        out.time = Xtream.epgClock(current["start"]) + " – " + Xtream.epgClock(current["end"])
+        out.nowTitle = Xtream.decodeBase64(current["title"])
+        out.progress = Xtream.epgProgress(Xtream.toInt(current["start_timestamp"]), Xtream.toInt(current["stop_timestamp"]))
+
+        if listings.Count() > 1
+            upcoming = listings[1]
+            out.nextTitle = Xtream.epgClock(upcoming["start"]) + "  " + Xtream.decodeBase64(upcoming["title"])
+        end if
+        return out
+    end function
+
+    ' How far through a programme we are, 0.0-1.0. Returns 0 when the timestamps are unusable.
+    function epgProgress(startTs as integer, stopTs as integer) as float
+        if startTs <= 0 or stopTs <= startTs then return 0
+        now = CreateObject("roDateTime").AsSeconds()
+        if now <= startTs then return 0
+        if now >= stopTs then return 1
+        return (now - startTs) / (stopTs - startTs)
+    end function
+
+    ' ---------- playback errors ----------
+
+    ' Friendly text for a Video node failure: { message, httpCode, detail }.
+    ' httpCode is 0 when no HTTP status could be found in the error fields.
+    function playbackError(errorCode as dynamic, errorStr as dynamic, errorInfo as dynamic) as object
+        code = Xtream.httpCodeFromError(errorStr, errorInfo)
+        if code = 401 or code = 404
+            text = "Channel is offline."
+        else if code = 403
+            ' Panels use 403 both for a dead stream and for a line that may not watch it.
+            text = "Channel is offline or not allowed on this line."
+        else if code = 429 or code = 458
+            text = "Too many connections. Stop another device and try again."
+        else if code >= 500
+            text = "The provider's server is not responding."
+        else
+            haystack = LCase(Xtream.errorHaystack(errorStr, errorInfo))
+            ' "no playable tracks" / "mediaerror" is what an AVI or an MPEG-2 stream reports.
+            if Instr(1, haystack, "decoder") > 0 or Instr(1, haystack, "codec") > 0 or Instr(1, haystack, "unsupported") > 0 or Instr(1, haystack, "no playable tracks") > 0 or Instr(1, haystack, "mediaerror") > 0
+                text = "This stream's video or audio format is not supported on this Roku."
+            else
+                text = "Could not play this stream."
+            end if
+        end if
+        return {
+            message: text
+            httpCode: code
+            detail: "errorCode=" + Xtream.toStr(errorCode) + " errorStr=" + Xtream.toStr(errorStr) + " " + Xtream.errorHaystack("", errorInfo)
+        }
+    end function
+
+    ' Codes that will not fix themselves: retrying the same URL is a waste of the viewer's time.
+    function isFatalHttpCode(code as integer) as boolean
+        return code = 401 or code = 403 or code = 404
+    end function
+
+    ' The line is at its connection limit. Says nothing about the channel - never hold it against one.
+    function isLineBusyCode(code as integer) as boolean
+        return code = 429 or code = 458
+    end function
+
+    ' Roku buries the HTTP status in errorStr / errorInfo.dbgmsg, formatted differently per firmware.
+    function httpCodeFromError(errorStr as dynamic, errorInfo as dynamic) as integer
+        haystack = Xtream.errorHaystack(errorStr, errorInfo)
+        for each code in [401, 403, 404, 429, 458, 500, 502, 503, 504]
+            if Xtream.hasNumberToken(haystack, code.ToStr()) then return code
+        end for
+        return 0
+    end function
+
+    ' Flattens errorStr + every errorInfo key into one searchable string.
+    function errorHaystack(errorStr as dynamic, errorInfo as dynamic) as string
+        out = Xtream.toStr(errorStr)
+        if errorInfo <> invalid and GetInterface(errorInfo, "ifAssociativeArray") <> invalid
+            for each key in errorInfo
+                out += " " + key + "=" + Xtream.toStr(errorInfo[key])
+            end for
+        end if
+        return out
+    end function
+
+    ' True when `token` appears in `haystack` without digits either side (so 4011 does not match 401).
+    function hasNumberToken(haystack as string, token as string) as boolean
+        from = 1
+        idx = Instr(from, haystack, token)
+        while idx > 0
+            okBefore = true
+            if idx > 1
+                b = Mid(haystack, idx - 1, 1)
+                okBefore = not (b >= "0" and b <= "9")
+            end if
+            after = idx + Len(token)
+            okAfter = true
+            if after <= Len(haystack)
+                a = Mid(haystack, after, 1)
+                okAfter = not (a >= "0" and a <= "9")
+            end if
+            if okBefore and okAfter then return true
+            from = idx + 1
+            idx = Instr(from, haystack, token)
+        end while
+        return false
+    end function
+
+    ' ---------- reading what the viewer typed ----------
+
+    ' Splits a typed or pasted address into its parts: { host: "http://x", port: "8080" }.
+    ' Any path is dropped - the Xtream base URL is only ever scheme + host + port.
+    function splitBaseUrl(raw as string) as object
+        url = Xtream.normalizeBaseUrl(raw)
+        if url = "" then return { host: "", port: "" }
+
+        scheme = "http://"
+        if LCase(Left(url, 8)) = "https://" then scheme = "https://"
+        rest = Mid(url, Len(scheme) + 1)
+
+        slash = Instr(1, rest, "/")
+        if slash > 0 then rest = Left(rest, slash - 1)
+
+        ' Last colon, so an IPv6-looking host does not lose its tail to the first one.
+        colon = 0
+        for i = 1 to Len(rest)
+            if Mid(rest, i, 1) = ":" then colon = i
+        end for
+        if colon = 0 then return { host: scheme + rest, port: "" }
+        return { host: scheme + Left(rest, colon - 1), port: Mid(rest, colon + 1) }
+    end function
+
+    function joinBaseUrl(host as string, port as string) as string
+        parts = Xtream.splitBaseUrl(host) ' host may itself carry a port; the field wins
+        base = parts.host
+        if base = "" then return ""
+        digits = Xtream.digitsOf(port)
+        if digits = "" then digits = Xtream.digitsOf(parts.port)
+        if digits = "" then return base
+        return base + ":" + digits
+    end function
+
+    function digitsOf(value as dynamic) as string
+        s = Xtream.toStr(value)
+        out = ""
+        for i = 1 to Len(s)
+            ch = Mid(s, i, 1)
+            if ch >= "0" and ch <= "9" then out += ch
+        end for
+        return out
+    end function
+
+    ' An M3U playlist URL carries the same credentials in its query string:
+    ' http://host:8080/get.php?username=u&password=p&type=m3u_plus
+    ' Only the query is read - M3U playlists themselves are not supported.
+    function parseM3uUrl(raw as string) as object
+        url = raw.Trim()
+        mark = Instr(1, url, "?")
+        if mark = 0 or Instr(1, LCase(url), "get.php") = 0 then return invalid
+
+        fields = {}
+        for each pair in Mid(url, mark + 1).Split("&")
+            eq = Instr(1, pair, "=")
+            if eq > 1 then fields[LCase(Left(pair, eq - 1))] = Mid(pair, eq + 1)
+        end for
+
+        username = Xtream.toStr(fields["username"])
+        password = Xtream.toStr(fields["password"])
+        if username = "" or password = "" then return invalid
+
+        parts = Xtream.splitBaseUrl(Left(url, mark - 1))
+        return { host: parts.host, port: parts.port, username: username, password: password }
+    end function
+
+    ' Unix timestamp -> "12 Mar 2027". Empty when there is nothing usable.
+    function dateLabel(value as dynamic) as string
+        seconds = Xtream.toInt(value)
+        if seconds <= 0 then return ""
+        stamp = CreateObject("roDateTime")
+        stamp.FromSeconds(seconds)
+        stamp.ToLocalTime()
+        return stamp.AsDateString("short-month-no-weekday")
+    end function
+
+    ' "host:port/" -> "http://host:port"
+    function normalizeBaseUrl(raw as string) as string
+        url = raw.Trim()
+        if url = "" then return ""
+        if LCase(Left(url, 7)) <> "http://" and LCase(Left(url, 8)) <> "https://"
+            url = "http://" + url
+        end if
+        while Right(url, 1) = "/"
+            url = Left(url, Len(url) - 1)
+        end while
+        return url
+    end function
+
+    ' Xtream EPG payloads base64-encode title/description.
+    function decodeBase64(s as dynamic) as string
+        if s = invalid or s = "" then return ""
+        ba = CreateObject("roByteArray")
+        ba.FromBase64String(s)
+        return ba.ToAsciiString()
+    end function
+
+    ' Percent-encoding without roUrlTransfer (which cannot be created on the render thread).
+    function encode(s as dynamic) as string
+        ba = CreateObject("roByteArray")
+        ba.FromAsciiString(Xtream.toStr(s))
+        out = ""
+        for each b in ba
+            isAlnum = (b >= 48 and b <= 57) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122)
+            if isAlnum or b = 45 or b = 46 or b = 95 or b = 126 ' - . _ ~
+                out += Chr(b)
+            else
+                hex = UCase(StrI(b, 16))
+                if Len(hex) < 2 then hex = "0" + hex
+                out += "%" + hex
+            end if
+        end for
+        return out
+    end function
+
+    ' Panels send ints as strings as often as not. Val(s, 10) keeps unix timestamps exact
+    ' (a float would lose ~2 minutes of precision at 1.7e9).
+    function toInt(v as dynamic) as integer
+        if v = invalid then return 0
+        if GetInterface(v, "ifInt") <> invalid then return v
+        if GetInterface(v, "ifFloat") <> invalid then return Int(v)
+        if GetInterface(v, "ifString") <> invalid
+            s = v.Trim()
+            if s = "" then return 0
+            return Val(s, 10)
+        end if
+        return 0
+    end function
+
+    function toStr(v as dynamic) as string
+        if v = invalid then return ""
+        if GetInterface(v, "ifString") <> invalid then return v
+        if GetInterface(v, "ifToStr") <> invalid then return v.ToStr()
+        return FormatJson(v)
+    end function
+
+end namespace

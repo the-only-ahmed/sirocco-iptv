@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Episode row: thumbnail, "S1E4 · Title", plot, and a resume bar when one was left part-watched.
+  Custom content fields: plotLine, progress (0-1).
+-->
+<component name="EpisodeItem" extends="Group">
+  <interface>
+    <field id="itemContent" type="node" onChange="onContentChanged" />
+    <field id="focusPercent" type="float" onChange="onFocusChanged" />
+  </interface>
+  <children>
+    <Rectangle id="bg" width="1420" height="120" color="#151B2B" opacity="0" />
+    <Poster id="thumb" translation="[8, 10]" width="178" height="100"
+            loadDisplayMode="scaleToZoom" loadWidth="178" loadHeight="100"
+            failedBitmapUri="pkg:/images/placeholder.png" />
+    <Rectangle id="progressBg" translation="[8, 104]" width="178" height="6" color="#0B0F19" visible="false" />
+    <Rectangle id="progress" translation="[8, 104]" width="0" height="6" color="#6366F1" visible="false" />
+
+    <Label id="name" translation="[206, 14]" width="1190" height="32"
+           font="font:MediumBoldSystemFont" color="#FFFFFF" />
+    <Label id="plot" translation="[206, 52]" width="1190" height="58" wrap="true" maxLines="2"
+           font="font:SmallestSystemFont" color="#8A93A6" />
+  </children>
+  <script type="text/brighterscript" uri="EpisodeItem.bs" />
+</component>

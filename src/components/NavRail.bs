@@ -1,0 +1,34 @@
+sub init()
+    m.list = m.top.findNode("list")
+
+    m.entries = [
+        { title: "Home", key: "home" }
+        { title: "Search", key: "search" }
+        { title: "Live TV", key: "live" }
+        { title: "Movies", key: "vod" }
+        { title: "Series", key: "series" }
+        { title: "Settings", key: "settings" }
+        { title: "Log out", key: "logout" }
+    ]
+
+    content = CreateObject("roSGNode", "ContentNode")
+    for each entry in m.entries
+        item = content.createChild("ContentNode")
+        item.title = entry.title
+    end for
+    m.list.content = content
+
+    m.list.observeField("itemSelected", "onItemSelected")
+    m.top.observeField("focusedChild", "onFocusedChild")
+end sub
+
+' The rail itself is a Group; hand focus on to the list inside it.
+sub onFocusedChild()
+    if m.top.hasFocus() then m.list.setFocus(true)
+end sub
+
+sub onItemSelected()
+    index = m.list.itemSelected
+    if index < 0 or index >= m.entries.Count() then return
+    m.top.selected = m.entries[index].key
+end sub

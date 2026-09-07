@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Runs one player_api.php request off the render thread.
+  Usage (see BaseScreen.apiRequest):
+    task.action = "get_live_categories"
+    task.params = { category_id: 12 }   ' optional
+    task.observeField("response", "onResponse")
+    task.control = "RUN"
+  response = { ok: true, data: <parsed json>, fromCache: <boolean> } | { ok: false, error: "..." }
+
+  Category and stream lists are served from a cachefs:/ copy for 6 hours; set refresh = true to
+  go past it (a Settings "Refresh" in Phase 9). EPG and login are never cached.
+-->
+<component name="XtreamApiTask" extends="Task">
+  <interface>
+    <field id="action" type="string" />
+    <field id="params" type="assocarray" />
+    <field id="refresh" type="boolean" value="false" />
+    <field id="response" type="assocarray" />
+  </interface>
+  <script type="text/brighterscript" uri="XtreamApiTask.bs" />
+</component>

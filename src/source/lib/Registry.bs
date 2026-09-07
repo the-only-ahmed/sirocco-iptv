@@ -1,0 +1,352 @@
+' Persistent storage (survives app restarts, cleared on channel uninstall).
+'
+' The whole registry is 16 KB per channel, so every list lives in ONE key packed as
+' "id=payload,id=payload". Ids are namespaced ("vod:123") and so contain ":", which is why "=" is
+' what separates the payload. Every payload starts with the epoch it was written, so one generic
+' prune can keep any list to its newest N entries.
+namespace Registry
+
+    const SECTION_AUTH = "auth"
+
+    function readAuth() as object
+        sec = CreateObject("roRegistrySection", Registry.SECTION_AUTH)
+        if not sec.Exists("baseUrl") then return invalid
+        return {
+            baseUrl: sec.Read("baseUrl")
+            streamBaseUrl: sec.Read("streamBaseUrl")
+            username: sec.Read("username")
+            password: sec.Read("password")
+        }
+    end function
+
+    sub writeAuth(auth as object)
+        sec = CreateObject("roRegistrySection", Registry.SECTION_AUTH)
+        sec.Write("baseUrl", auth.baseUrl)
+        if auth.streamBaseUrl <> invalid then sec.Write("streamBaseUrl", auth.streamBaseUrl)
+        sec.Write("username", auth.username)
+        sec.Write("password", auth.password)
+        sec.Flush()
+    end sub
+
+    sub clearAuth()
+        sec = CreateObject("roRegistrySection", Registry.SECTION_AUTH)
+        for each key in sec.GetKeyList()
+            sec.Delete(key)
+        end for
+        sec.Flush()
+    end sub
+
+    ' ---------- saved servers ----------
+    '
+    ' Stored as JSON, not the packed format: a password or URL may contain "," or "=".
+    const SECTION_PROFILES = "profiles"
+    const PROFILES_KEY = "list"
+    const PROFILES_MAX = 10
+
+    ' [{ baseUrl, streamBaseUrl, username, password, expDate, maxConnections, lastUsed }],
+    ' most recently used first.
+    function profiles() as object
+        sec = CreateObject("roRegistrySection", Registry.SECTION_PROFILES)
+        if not sec.Exists(Registry.PROFILES_KEY) then return []
+
+        list = ParseJson(sec.Read(Registry.PROFILES_KEY))
+        if list = invalid or GetInterface(list, "ifArray") = invalid then return []
+        list.SortBy("lastUsed", "r")
+        return list
+    end function
+
+    ' Adds or refreshes the entry for this account and marks it as the most recent. `account` carries
+    ' what user_info told us, so the picker can show an expiry without connecting first.
+    sub saveProfile(auth as object, account = invalid as object)
+        if auth = invalid or auth.baseUrl = invalid then return
+
+        id = Registry.profileId(auth)
+        existing = Registry.profileFor(auth)
+        if account = invalid then account = existing ' keep what we already knew
+
+        out = [{
+            baseUrl: auth.baseUrl
+            streamBaseUrl: Registry.text(auth.streamBaseUrl)
+            username: auth.username
+            password: auth.password
+            expDate: Registry.number(account, "expDate")
+            maxConnections: Registry.number(account, "maxConnections")
+            lastUsed: Registry.now()
+        }]
+        for each profile in Registry.profiles()
+            if Registry.profileId(profile) <> id and out.Count() < Registry.PROFILES_MAX then out.Push(profile)
+        end for
+
+        sec = CreateObject("roRegistrySection", Registry.SECTION_PROFILES)
+        sec.Write(Registry.PROFILES_KEY, FormatJson(out))
+        sec.Flush()
+    end sub
+
+    sub deleteProfile(id as string)
+        out = []
+        for each profile in Registry.profiles()
+            if Registry.profileId(profile) <> id then out.Push(profile)
+        end for
+
+        sec = CreateObject("roRegistrySection", Registry.SECTION_PROFILES)
+        sec.Write(Registry.PROFILES_KEY, FormatJson(out))
+        sec.Flush()
+    end sub
+
+    ' The saved entry for this account, or invalid.
+    function profileFor(auth as object) as object
+        if auth = invalid then return invalid
+        id = Registry.profileId(auth)
+        for each profile in Registry.profiles()
+            if Registry.profileId(profile) = id then return profile
+        end for
+        return invalid
+    end function
+
+    function number(source as object, key as string) as integer
+        if source = invalid then return 0
+        if GetInterface(source, "ifAssociativeArray") = invalid then return 0
+        value = source[key]
+        if value = invalid then return 0
+        if GetInterface(value, "ifInt") <> invalid then return value
+        if GetInterface(value, "ifFloat") <> invalid then return Int(value)
+        if GetInterface(value, "ifString") <> invalid then return Val(value, 10)
+        return 0
+    end function
+
+    ' Same server with two logins is two profiles, so the username is part of the identity.
+    function profileId(profile as object) as string
+        return Registry.text(profile.baseUrl) + "|" + Registry.text(profile.username)
+    end function
+
+    function text(value as dynamic) as string
+        if value = invalid then return ""
+        if GetInterface(value, "ifString") = invalid then return ""
+        return value
+    end function
+
+    ' ---------- packed lists ----------
+
+    function readPacked(section as string, key as string) as object
+        out = {}
+        sec = CreateObject("roRegistrySection", section)
+        if not sec.Exists(key) then return out
+
+        for each pair in sec.Read(key).Split(",")
+            sep = Instr(1, pair, "=")
+            if sep > 1
+                out[Left(pair, sep - 1)] = Mid(pair, sep + 1)
+            else
+                ' Dead entries written before ids were namespaced look like "<id>:<epoch>".
+                parts = pair.Split(":")
+                if parts.Count() = 2 then out[parts[0]] = parts[1]
+            end if
+        end for
+        return out
+    end function
+
+    sub writePacked(section as string, key as string, entries as object, max as integer)
+        ids = Registry.newestIds(entries, max)
+        packed = ""
+        for each id in ids
+            if packed <> "" then packed += ","
+            packed += id + "=" + entries[id]
+        end for
+
+        sec = CreateObject("roRegistrySection", section)
+        sec.Write(key, packed)
+        sec.Flush()
+    end sub
+
+    ' Ids ordered newest first, cut to `max`. Every payload begins with its epoch.
+    function newestIds(entries as object, max as integer) as object
+        ranked = []
+        for each id in entries
+            ranked.Push({ id: id, at: Registry.writtenAt(entries[id]) })
+        end for
+        ranked.SortBy("at", "r")
+
+        out = []
+        for each entry in ranked
+            if out.Count() >= max then exit for
+            out.Push(entry.id)
+        end for
+        return out
+    end function
+
+    function writtenAt(payload as dynamic) as integer
+        if payload = invalid then return 0
+        parts = payload.Split(":")
+        if parts.Count() = 0 then return 0
+        return Val(parts[0], 10)
+    end function
+
+    function now() as integer
+        return CreateObject("roDateTime").AsSeconds()
+    end function
+
+    ' ---------- learned dead items ----------
+    '
+    ' The Xtream API has no liveness flag and probing the whole catalogue would blow past the line's
+    ' connection limit, so we only remember what playback (or a sweep) already proved.
+    const SECTION_DEAD = "dead"
+    const DEAD_KEY = "ids"
+    const DEAD_TTL_SECONDS = 604800 ' 7 days, so a channel the provider fixes comes back
+    const DEAD_MAX = 200
+
+    ' { "<kind>:<id>": true } for everything still within its TTL.
+    function readDead() as object
+        out = {}
+        cutoff = Registry.now() - Registry.DEAD_TTL_SECONDS
+        entries = Registry.readPacked(Registry.SECTION_DEAD, Registry.DEAD_KEY)
+        for each id in entries
+            if Registry.writtenAt(entries[id]) > cutoff
+                out[id] = true
+                ' Entries written before ids were namespaced were all live channels.
+                if Instr(1, id, ":") = 0 then out["live:" + id] = true
+            end if
+        end for
+        return out
+    end function
+
+    sub markDead(id as string)
+        if id = "" then return
+        entries = Registry.readPacked(Registry.SECTION_DEAD, Registry.DEAD_KEY)
+        entries[id] = Registry.now().ToStr()
+        Registry.writePacked(Registry.SECTION_DEAD, Registry.DEAD_KEY, entries, Registry.DEAD_MAX)
+    end sub
+
+    sub clearDead()
+        sec = CreateObject("roRegistrySection", Registry.SECTION_DEAD)
+        sec.Delete(Registry.DEAD_KEY)
+        sec.Flush()
+    end sub
+
+    ' ---------- resume positions ----------
+    '
+    ' Payload is "<epoch>:<position>:<duration>", all seconds. Ids are "vod:<id>" / "ep:<id>".
+    const SECTION_PROGRESS = "progress"
+    const PROGRESS_KEY = "items"
+    const PROGRESS_MAX = 100
+    ' Under this, nothing worth resuming; over WATCHED_RATIO, it counts as watched and is dropped.
+    const PROGRESS_MIN_SECONDS = 30
+    const WATCHED_RATIO = 0.9
+
+    sub saveProgress(id as string, position as integer, duration as integer)
+        if id = "" or duration <= 0 or position < 0 then return
+
+        entries = Registry.readPacked(Registry.SECTION_PROGRESS, Registry.PROGRESS_KEY)
+        if position < Registry.PROGRESS_MIN_SECONDS or position > duration * Registry.WATCHED_RATIO
+            if not entries.DoesExist(id) then return ' nothing stored, nothing to clear
+            entries.Delete(id)
+        else
+            entries[id] = Registry.now().ToStr() + ":" + position.ToStr() + ":" + duration.ToStr()
+        end if
+        Registry.writePacked(Registry.SECTION_PROGRESS, Registry.PROGRESS_KEY, entries, Registry.PROGRESS_MAX)
+    end sub
+
+    ' { position, duration, at } or invalid.
+    function readProgress(id as string) as object
+        payload = Registry.readPacked(Registry.SECTION_PROGRESS, Registry.PROGRESS_KEY)[id]
+        if payload = invalid then return invalid
+        parts = payload.Split(":")
+        if parts.Count() < 3 then return invalid
+        return { at: Val(parts[0], 10), position: Val(parts[1], 10), duration: Val(parts[2], 10) }
+    end function
+
+    ' [{ id, position, duration, at }], newest first - what "Continue watching" is built from.
+    function progressList() as object
+        entries = Registry.readPacked(Registry.SECTION_PROGRESS, Registry.PROGRESS_KEY)
+        out = []
+        for each id in Registry.newestIds(entries, Registry.PROGRESS_MAX)
+            parts = entries[id].Split(":")
+            if parts.Count() >= 3
+                out.Push({ id: id, at: Val(parts[0], 10), position: Val(parts[1], 10), duration: Val(parts[2], 10) })
+            end if
+        end for
+        return out
+    end function
+
+    ' ---------- favorites ----------
+
+    const SECTION_FAV = "favorites"
+    const FAV_KEY = "ids"
+    const FAV_MAX = 200
+
+    function isFavorite(id as string) as boolean
+        return Registry.readPacked(Registry.SECTION_FAV, Registry.FAV_KEY).DoesExist(id)
+    end function
+
+    ' Returns the new state.
+    function toggleFavorite(id as string) as boolean
+        if id = "" then return false
+        entries = Registry.readPacked(Registry.SECTION_FAV, Registry.FAV_KEY)
+        added = not entries.DoesExist(id)
+        if added
+            entries[id] = Registry.now().ToStr()
+        else
+            entries.Delete(id)
+        end if
+        Registry.writePacked(Registry.SECTION_FAV, Registry.FAV_KEY, entries, Registry.FAV_MAX)
+        return added
+    end function
+
+    ' Ids, newest first.
+    function favorites() as object
+        entries = Registry.readPacked(Registry.SECTION_FAV, Registry.FAV_KEY)
+        return Registry.newestIds(entries, Registry.FAV_MAX)
+    end function
+
+    ' { id: true } for quick membership checks while building a list.
+    function favoriteSet() as object
+        out = {}
+        for each id in Registry.favorites()
+            out[id] = true
+        end for
+        return out
+    end function
+
+    ' ---------- parental control ----------
+
+    const SECTION_PARENTAL = "parental"
+    const PIN_KEY = "pin"
+    const LOCKED_KEY = "locked"
+    const LOCKED_MAX = 100
+
+    ' "" until the viewer sets one.
+    function parentalPin() as string
+        sec = CreateObject("roRegistrySection", Registry.SECTION_PARENTAL)
+        if not sec.Exists(Registry.PIN_KEY) then return ""
+        return sec.Read(Registry.PIN_KEY)
+    end function
+
+    sub setParentalPin(pin as string)
+        sec = CreateObject("roRegistrySection", Registry.SECTION_PARENTAL)
+        sec.Write(Registry.PIN_KEY, pin)
+        sec.Flush()
+    end sub
+
+    ' Categories the viewer locked by hand, keyed "live:5" / "vod:12" / "series:3" -> true.
+    function lockedCategories() as object
+        out = {}
+        for each key in Registry.readPacked(Registry.SECTION_PARENTAL, Registry.LOCKED_KEY)
+            out[key] = true
+        end for
+        return out
+    end function
+
+    ' Returns the new state.
+    function toggleLockedCategory(key as string) as boolean
+        if key = "" then return false
+        entries = Registry.readPacked(Registry.SECTION_PARENTAL, Registry.LOCKED_KEY)
+        locked = not entries.DoesExist(key)
+        if locked
+            entries[key] = Registry.now().ToStr()
+        else
+            entries.Delete(key)
+        end if
+        Registry.writePacked(Registry.SECTION_PARENTAL, Registry.LOCKED_KEY, entries, Registry.LOCKED_MAX)
+        return locked
+    end function
+
+end namespace

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- params: { url: string, title: string, streamFormat: "hls"|"mp4"|"mkv"|"dash", isLive: boolean } -->
+<component name="PlayerScreen" extends="BaseScreen">
+  <children>
+    <Video id="video" width="1920" height="1080" enableUI="true" />
+
+    <!-- Buffering / reconnecting overlay, drawn on top of the video -->
+    <Group id="bufferingGroup" visible="false" translation="[760, 480]">
+      <Rectangle width="400" height="120" color="#151B2B" opacity="0.85" />
+      <Label id="bufferingLabel" text="Buffering…" width="400" height="120"
+             horizAlign="center" vertAlign="center"
+             font="font:MediumBoldSystemFont" color="#FFFFFF" />
+    </Group>
+
+    <!-- Live channel banner: number, name, now/next, progress. Shown for 4 s on zap / OK. -->
+    <ChannelBanner id="banner" translation="[120, 800]" />
+
+    <!-- Audio / subtitle chooser; owns its own dialog -->
+    <TrackPicker id="trackPicker" />
+
+    <!-- Channel number being typed on the remote -->
+    <ChannelNumberEntry id="numberEntry" translation="[1560, 100]" />
+
+    <!-- One automatic retry after a playback error; many panels 502/timeout on the first hit -->
+    <Timer id="retryTimer" repeat="false" />
+    <!-- Live only: "Still watching?" so an idle TV stops eating a provider connection -->
+    <Timer id="idleTimer" repeat="false" />
+    <!-- How long that prompt waits for an answer before stopping the stream -->
+    <Timer id="graceTimer" repeat="false" />
+  </children>
+  <script type="text/brighterscript" uri="PlayerScreen.bs" />
+</component>

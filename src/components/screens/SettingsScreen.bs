@@ -1,0 +1,196 @@
+import "pkg:/source/lib/Xtream.bs"
+import "pkg:/source/lib/Registry.bs"
+import "pkg:/source/lib/Log.bs"
+
+sub init()
+    m.list = m.top.findNode("list")
+    m.about = m.top.findNode("about")
+    m.actions = []
+    m.dialog = invalid
+    m.dialogAction = ""
+    m.editingUserAgent = false
+
+    m.list.observeField("itemSelected", "onItemSelected")
+    m.top.observeField("params", "onParams")
+    m.defaultFocus = m.list
+end sub
+
+sub onParams()
+    buildList()
+    m.about.text = aboutText()
+end sub
+
+' ---------- the list ----------
+
+sub buildList()
+    m.actions = []
+    content = CreateObject("roSGNode", "ContentNode")
+
+    addRow(content, "User-Agent:  " + Xtream.userAgent(), "userAgent")
+    addRow(content, "Reset User-Agent to default", "resetUserAgent")
+    addRow(content, "Parental PIN:  " + pinState(), "pin")
+    addRow(content, "Clear locked categories", "clearLocks")
+    addRow(content, "Clear cached lists", "clearCache")
+    addRow(content, "Show hidden channels and movies", "clearDead")
+    addRow(content, "Clear watch history (" + Registry.progressList().Count().ToStr() + ")", "clearProgress")
+    addRow(content, "Clear favorites (" + Registry.favorites().Count().ToStr() + ")", "clearFavorites")
+
+    m.list.content = content
+end sub
+
+sub addRow(content as object, label as string, action as string)
+    row = content.createChild("ContentNode")
+    row.title = label
+    m.actions.Push(action)
+end sub
+
+function pinState() as string
+    if Registry.parentalPin() = "" then return "not set"
+    return "set  ·  OK to change"
+end function
+
+function aboutText() as string
+    info = CreateObject("roAppInfo")
+    device = CreateObject("roDeviceInfo")
+
+    lines = "Sirocco IPTV " + info.GetVersion()
+    lines += Chr(10) + "Channel " + info.GetID()
+    if info.IsDev() then lines += "  (sideloaded)"
+    lines += Chr(10) + Chr(10) + device.GetModelDisplayName() + "  ·  " + device.GetModel()
+    lines += Chr(10) + "Roku OS " + device.GetOSVersion().major + "." + device.GetOSVersion().minor
+
+    auth = m.global.auth
+    if auth <> invalid and auth.baseUrl <> invalid
+        lines += Chr(10) + Chr(10) + auth.username + Chr(10) + auth.baseUrl
+        if auth.streamBaseUrl <> invalid and auth.streamBaseUrl <> "" and auth.streamBaseUrl <> auth.baseUrl
+            lines += Chr(10) + "streams: " + auth.streamBaseUrl
+        end if
+    end if
+
+    account = m.global.account
+    if account <> invalid
+        expiry = Xtream.dateLabel(account.expDate)
+        if expiry <> "" then lines += Chr(10) + "expires " + expiry
+        connections = Registry.number(account, "maxConnections")
+        if connections > 0 then lines += Chr(10) + connections.ToStr() + " connection(s)"
+    end if
+    return lines
+end function
+
+' ---------- actions ----------
+
+sub onItemSelected()
+    index = m.list.itemSelected
+    if index < 0 or index >= m.actions.Count() then return
+    action = m.actions[index]
+
+    if action = "userAgent"
+        editUserAgent()
+    else if action = "resetUserAgent"
+        Xtream.setUserAgent("")
+        showToast("User-Agent reset")
+        buildList()
+    else if action = "pin"
+        changePin()
+    else
+        confirm(action)
+    end if
+end sub
+
+sub editUserAgent()
+    askText("User-Agent", Xtream.userAgent())
+end sub
+
+' Overrides BaseScreen: the keyboard was editing the User-Agent.
+sub onTextEntered(value as string)
+    Xtream.setUserAgent(value)
+    showToast("User-Agent saved")
+    buildList()
+    m.list.setFocus(true)
+end sub
+
+' Changing the PIN needs the old one first; requirePin() reports back through pinPassed.
+sub changePin()
+    if Registry.parentalPin() = ""
+        askNumber("Create a parental PIN (4 digits)", true, "newPin")
+        return
+    end if
+    m.top.observeFieldScoped("pinPassed", "onPinPassed")
+    requirePin()
+end sub
+
+sub onPinPassed()
+    m.top.unobserveFieldScoped("pinPassed")
+    askNumber("New PIN (4 digits)", true, "newPin")
+end sub
+
+' ---------- confirmations ----------
+
+sub confirm(action as string)
+    messages = {
+        clearLocks: "Unlock every category that was locked by hand?"
+        clearCache: "Clear the cached channel and movie lists? They will be fetched again."
+        clearDead: "Show every channel and movie again, including ones that failed to play?"
+        clearProgress: "Forget where you got to in every movie and episode?"
+        clearFavorites: "Remove everything from favorites?"
+    }
+
+    dialog = CreateObject("roSGNode", "Dialog")
+    dialog.title = "Are you sure?"
+    dialog.message = messages[action]
+    dialog.buttons = ["Yes", "Cancel"]
+    dialog.observeField("buttonSelected", "onConfirmButton")
+    dialog.observeField("wasClosed", "dismissDialog")
+    m.dialogAction = action
+    m.dialog = dialog
+    m.top.getScene().dialog = dialog
+end sub
+
+sub onConfirmButton()
+    if m.dialog = invalid then return
+    yes = (m.dialog.buttonSelected = 0)
+    action = m.dialogAction
+    m.dialog = invalid
+    m.dialogAction = ""
+    dismissDialog()
+    if not yes then return
+
+    if action = "clearLocks"
+        for each key in Registry.lockedCategories()
+            Registry.toggleLockedCategory(key)
+        end for
+        showToast("Locked categories cleared")
+    else if action = "clearCache"
+        showToast(clearCache().ToStr() + " cached lists cleared")
+    else if action = "clearDead"
+        Registry.clearDead()
+        showToast("Hidden items restored")
+    else if action = "clearProgress"
+        for each entry in Registry.progressList()
+            Registry.saveProgress(entry.id, 0, entry.duration) ' a zero position drops the entry
+        end for
+        showToast("Watch history cleared")
+    else if action = "clearFavorites"
+        for each id in Registry.favorites()
+            Registry.toggleFavorite(id)
+        end for
+        showToast("Favorites cleared")
+    end if
+    buildList()
+end sub
+
+' Deletes this app's cached responses. Deliberate one-off action, so the render thread can wear it.
+function clearCache() as integer
+    removed = 0
+    fs = CreateObject("roFileSystem")
+    for each dir in ["cachefs:/", "tmp:/"]
+        listing = fs.GetDirectoryListing(dir)
+        if listing <> invalid
+            for each name in listing
+                if Left(name, 3) = "xc_" and fs.Delete(dir + name) then removed += 1
+            end for
+        end if
+    end for
+    Log.info("Settings", "cleared " + removed.ToStr() + " cache files")
+    return removed
+end function

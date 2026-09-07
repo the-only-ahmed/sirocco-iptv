@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Left-hand navigation. Sets `selected` to "home" | "live" | "vod" | "series" | "logout" when a row
+  is chosen; the screen decides what that means. Focus given to the rail is forwarded to its list.
+-->
+<component name="NavRail" extends="Group">
+  <interface>
+    <field id="selected" type="string" alwaysNotify="true" />
+  </interface>
+  <children>
+    <Rectangle width="280" height="800" color="#151B2B" opacity="0.55" />
+    <Label id="brand" text="Sirocco" translation="[28, 30]"
+           font="font:MediumBoldSystemFont" color="#6366F1" />
+    <LabelList id="list" translation="[16, 110]" itemSize="[248, 68]" numRows="7"
+               color="#8A93A6" focusedColor="#FFFFFF" />
+  </children>
+  <script type="text/brighterscript" uri="NavRail.bs" />
+</component>

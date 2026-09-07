@@ -1,0 +1,106 @@
+import "pkg:/source/lib/Xtream.bs"
+
+sub init()
+    m.body = m.top.findNode("body")
+    m.heading = m.top.findNode("heading")
+    m.list = m.top.findNode("list")
+    m.programmes = []
+    m.streamId = ""
+    m.channelName = ""
+    m.task = invalid
+    m.list.observeField("itemSelected", "onSelected")
+end sub
+
+sub onChannel()
+    channel = m.top.channel
+    if channel = invalid then return
+
+    m.streamId = Xtream.toStr(channel.streamId)
+    m.channelName = Xtream.toStr(channel.name)
+    m.programmes = []
+    m.list.content = invalid
+    m.heading.text = "Catch-up — " + m.channelName
+
+    ' Not a screen, so no BaseScreen.apiRequest here - the task is created directly.
+    task = CreateObject("roSGNode", "XtreamApiTask")
+    task.action = "get_simple_data_table"
+    task.params = { stream_id: m.streamId }
+    task.observeField("response", "onResponse")
+    task.control = "RUN"
+    m.task = task
+end sub
+
+sub onResponse(event as object)
+    m.task = invalid
+    res = event.getData()
+    if not res.ok
+        m.top.failed = res.error
+        return
+    end if
+
+    listings = pick(res.data, "epg_listings", [])
+    now = CreateObject("roDateTime").AsSeconds()
+    content = CreateObject("roSGNode", "ContentNode")
+
+    for each listing in listings
+        ' Only programmes that have already finished can be replayed.
+        if Xtream.toInt(pick(listing, "stop_timestamp", 0)) < now
+            m.programmes.Push(listing)
+            item = content.createChild("ContentNode")
+            item.title = Xtream.epgClock(pick(listing, "start", "")) + "   " + Xtream.decodeBase64(pick(listing, "title", ""))
+        end if
+    end for
+
+    if m.programmes.Count() = 0
+        m.top.failed = "Nothing in the archive for this channel yet."
+        return
+    end if
+
+    m.list.content = content
+    m.body.visible = true
+    m.top.open = true
+    m.list.setFocus(true)
+end sub
+
+sub onSelected()
+    index = m.list.itemSelected
+    if index < 0 or index >= m.programmes.Count() then return
+    listing = m.programmes[index]
+
+    stamp = Xtream.timeshiftStamp(pick(listing, "start", ""))
+    if stamp = ""
+        m.top.failed = "This programme has no usable start time."
+        return
+    end if
+
+    minutes = Int((Xtream.toInt(pick(listing, "stop_timestamp", 0)) - Xtream.toInt(pick(listing, "start_timestamp", 0))) / 60)
+    if minutes <= 0 then minutes = 60
+
+    close()
+    m.top.play = {
+        url: Xtream.catchupHlsUrl(m.global.auth, m.streamId, stamp, minutes)
+        title: m.channelName + " — " + Xtream.decodeBase64(pick(listing, "title", ""))
+    }
+end sub
+
+sub onDismiss()
+    close()
+end sub
+
+sub close()
+    m.body.visible = false
+    m.top.open = false
+    if m.task <> invalid
+        m.task.control = "STOP"
+        m.task = invalid
+    end if
+end sub
+
+' CatchupOverlay is not a screen, so it needs its own copy of the safe JSON read.
+function pick(obj as object, key as string, fallback = "" as dynamic) as dynamic
+    if obj = invalid then return fallback
+    if GetInterface(obj, "ifAssociativeArray") = invalid then return fallback
+    value = obj[key]
+    if value = invalid then return fallback
+    return value
+end function

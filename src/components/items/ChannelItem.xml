@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MarkupList row for the Live channel pane: number, logo, name, now-playing.
+     Reads itemContent.num / HDPOSTERURL / title / nowTitle. -->
+<component name="ChannelItem" extends="Group">
+  <interface>
+    <field id="itemContent" type="node" onChange="onContentChanged" />
+    <field id="focusPercent" type="float" onChange="onFocusChanged" />
+  </interface>
+  <children>
+    <Rectangle id="bg" width="620" height="72" color="#151B2B" opacity="0" />
+    <Label id="num" width="60" height="72" translation="[0, 0]" horizAlign="right" vertAlign="center"
+           font="font:SmallestSystemFont" color="#8A93A6" />
+    <Poster id="logo" width="56" height="56" translation="[76, 8]"
+            loadDisplayMode="scaleToFit" loadWidth="56" loadHeight="56"
+            failedBitmapUri="pkg:/images/placeholder.png" />
+    <Label id="name" width="460" height="30" translation="[148, 8]"
+           font="font:MediumSystemFont" color="#FFFFFF" />
+    <Label id="now" width="460" height="24" translation="[148, 40]"
+           font="font:SmallestSystemFont" color="#8A93A6" />
+  </children>
+  <script type="text/brighterscript" uri="ChannelItem.bs" />
+</component>

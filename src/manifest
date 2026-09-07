@@ -1,0 +1,25 @@
+title=Sirocco IPTV
+major_version=1
+minor_version=0
+build_version=1
+
+# Icons must be exactly these sizes or the dashboard's static analysis rejects them:
+# mm_icon_focus_hd 290x218, mm_icon_focus_sd 248x140.
+mm_icon_focus_hd=pkg:/images/icon_focus_hd.png
+mm_icon_focus_sd=pkg:/images/icon_focus_sd.png
+
+# Splash sizes are per resolution: fhd 1920x1080, hd 1280x720, sd 720x480.
+splash_screen_fhd=pkg:/images/splash_fhd.png
+splash_screen_hd=pkg:/images/splash_hd.png
+splash_screen_sd=pkg:/images/splash_sd.png
+splash_color=#0B0F19
+splash_min_time=500
+
+ui_resolutions=fhd
+# Modern SceneGraph behaviour; without it the app runs against the 2015-era defaults.
+rsg_version=1.2
+supports_input_launch=1
+
+# DEBUG=false for anything you sign and ship: it strips Log.info and the raw error detail that the
+# player appends to its dialogs. `npm run build:release` flips this for you.
+bs_const=DEBUG=true

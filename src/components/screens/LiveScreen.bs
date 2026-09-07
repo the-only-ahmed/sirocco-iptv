@@ -1,0 +1,500 @@
+import "pkg:/source/lib/Xtream.bs"
+import "pkg:/source/lib/Log.bs"
+import "pkg:/source/lib/Registry.bs"
+
+' Cap on ContentNode children. The panel turned out to be 3713 channels, not the 140k the plan
+' assumed, so "All" now fits in one build; the cap is only a guard against a much larger provider.
+const MAX_CHANNELS = 4000
+' How long a channel's now/next stays usable before it is fetched again.
+const EPG_CACHE_SECONDS = 300
+' Most channels one sweep will check. At ~1 s each this is already a few minutes of background work.
+const PROBE_MAX = 200
+' Channels added per timer tick: the whole panel at once froze the screen for 5-10 s.
+const CHANNEL_CHUNK = 150
+' Zapping only needs a window around the current channel - building 4000 entries would stall the UI.
+const PLAYLIST_SPAN = 150
+' Synthetic category id for the favorites filter; the panel never uses it.
+const FAVORITES_ID = "__favorites"
+
+sub init()
+    m.title = m.top.findNode("title")
+    m.categoriesList = m.top.findNode("categories")
+    m.channelsList = m.top.findNode("channels")
+    m.epgPanel = m.top.findNode("info")
+    m.catchup = m.top.findNode("catchup")
+    m.epgTimer = m.top.findNode("epgTimer")
+    m.buildTimer = m.top.findNode("buildTimer")
+
+    m.categories = []
+    m.allChannels = []
+    m.channels = []
+    m.channelContent = invalid
+    m.epgCache = {}
+    m.epgPendingId = ""
+    m.focusIndex = -1
+    m.pendingCategory = -1
+    m.lockIndex = 0
+    m.titleBase = "Live TV"
+    m.favoritesOnly = false
+    m.buildIndex = 0
+    m.buildLimit = 0
+    m.keepIndex = -1
+
+    m.categoriesList.observeField("itemSelected", "onCategorySelected")
+    m.channelsList.observeField("itemFocused", "onChannelFocused")
+    m.channelsList.observeField("itemSelected", "onChannelSelected")
+    m.catchup.observeField("play", "onCatchupPlay")
+    m.catchup.observeField("failed", "onCatchupFailed")
+    m.top.observeField("pinPassed", "onPinPassed")
+    m.epgTimer.observeField("fire", "onEpgTimer")
+    m.buildTimer.observeField("fire", "appendChannelChunk")
+    m.top.observeField("visible", "onVisibleChanged")
+    m.top.observeField("dispose", "stopSweep") ' extra observer: BaseScreen keeps its own
+
+    m.defaultFocus = m.categoriesList
+    m.top.observeField("params", "onParams")
+end sub
+
+' MainScene sets params right after init(); load here so the BaseScreen helpers are ready.
+sub onParams()
+    setLoading(true)
+    apiRequest("get_live_categories", {}, "onCategories")
+end sub
+
+' ---------- categories ----------
+
+sub onCategories(event as object)
+    setLoading(false)
+    res = event.getData()
+    if not res.ok
+        showError(res.error)
+        return
+    end if
+
+    m.categories = res.data
+    m.categories.Unshift({ category_id: "", category_name: "All" })
+    if Registry.favorites().Count() > 0
+        m.categories.Unshift({ category_id: FAVORITES_ID, category_name: "★ Favorites" })
+    end if
+    buildCategoryList()
+
+    ' Deep link from the Home row: open straight into a category.
+    wanted = Xtream.toStr(pick(m.top.params, "categoryId", ""))
+    if wanted = "" then return
+    for i = 0 to m.categories.Count() - 1
+        if Xtream.toStr(pick(m.categories[i], "category_id", "")) = wanted
+            m.categoriesList.jumpToItem = i
+            loadCategory(i)
+            return
+        end if
+    end for
+end sub
+
+sub buildCategoryList()
+    content = CreateObject("roSGNode", "ContentNode")
+    for each cat in m.categories
+        item = content.createChild("ContentNode")
+        name = pick(cat, "category_name", "Untitled")
+        if isLockedCategory(categoryKey(cat), name) then name += "   (locked)"
+        item.title = name
+    end for
+    m.categoriesList.content = content
+end sub
+
+function categoryKey(cat as object) as string
+    return "live:" + Xtream.toStr(pick(cat, "category_id", ""))
+end function
+
+sub onCategorySelected()
+    index = m.categoriesList.itemSelected
+    if index < 0 or index >= m.categories.Count() then return
+
+    cat = m.categories[index]
+    if isLockedCategory(categoryKey(cat), pick(cat, "category_name", ""))
+        m.pendingCategory = index
+        requirePin()
+        return
+    end if
+    loadCategory(index)
+end sub
+
+sub onPinPassed()
+    index = m.pendingCategory
+    m.pendingCategory = -1
+    m.lockIndex = 0
+    if index >= 0 then loadCategory(index)
+end sub
+
+sub loadCategory(index as integer)
+    if index < 0 or index >= m.categories.Count() then return
+    cat = m.categories[index]
+
+    stopSweep()
+    m.allChannels = []
+    m.channels = []
+    m.channelsList.content = invalid
+    clearInfo()
+
+    params = {}
+    categoryId = Xtream.toStr(pick(cat, "category_id", ""))
+    m.favoritesOnly = (categoryId = FAVORITES_ID)
+    if categoryId <> "" and not m.favoritesOnly then params.category_id = categoryId
+
+    setLoading(true)
+    apiRequest("get_live_streams", params, "onChannels")
+end sub
+
+sub onChannels(event as object)
+    setLoading(false)
+    res = event.getData()
+    if not res.ok
+        showError(res.error)
+        return
+    end if
+
+    m.allChannels = res.data
+    if m.favoritesOnly
+        favorites = Registry.favoriteSet()
+        kept = []
+        for each raw in m.allChannels
+            if favorites.DoesExist("live:" + streamIdOf(raw)) then kept.Push(raw)
+        end for
+        m.allChannels = kept
+    end if
+    rebuildChannels("")
+    if m.channels.Count() > 0 then m.channelsList.setFocus(true)
+    startProbe()
+end sub
+
+' Rebuilds the list minus whatever is now known dead, keeping focus on keepStreamId if it survives.
+sub rebuildChannels(keepStreamId as string)
+    m.buildTimer.control = "stop"
+    dead = Registry.readDead()
+    m.channels = []
+    for each raw in m.allChannels
+        if not dead.DoesExist("live:" + streamIdOf(raw)) then m.channels.Push(raw)
+    end for
+    hidden = m.allChannels.Count() - m.channels.Count()
+
+    m.buildLimit = m.channels.Count()
+    if m.buildLimit > MAX_CHANNELS then m.buildLimit = MAX_CHANNELS
+    m.buildIndex = 0
+    m.keepIndex = indexOfStreamId(keepStreamId)
+
+    m.channelContent = CreateObject("roSGNode", "ContentNode")
+    m.channelsList.content = m.channelContent
+
+    m.titleBase = "Live TV — " + m.buildLimit.ToStr() + " channels"
+    if hidden > 0 then m.titleBase += "  (" + hidden.ToStr() + " hidden as dead — press Replay on a category to restore)"
+    m.title.text = m.titleBase
+    appendChannelChunk()
+end sub
+
+' Rows are added a slice at a time; the list draws whatever is there already.
+sub appendChannelChunk()
+    limit = m.buildIndex + CHANNEL_CHUNK
+    if limit > m.buildLimit then limit = m.buildLimit
+
+    for i = m.buildIndex to limit - 1
+        raw = m.channels[i]
+        node = m.channelContent.createChild("ContentNode")
+        node.addFields({ num: "", nowTitle: "" })
+        node.title = pick(raw, "name", "Untitled")
+        node.HDPOSTERURL = Xtream.toStr(pick(raw, "stream_icon", ""))
+        node.num = Xtream.toStr(pick(raw, "num", (i + 1).ToStr()))
+    end for
+
+    m.buildIndex = limit
+    if m.keepIndex >= 0 and m.keepIndex < limit
+        m.channelsList.jumpToItem = m.keepIndex
+        m.keepIndex = -1
+    end if
+    if limit < m.buildLimit then m.buildTimer.control = "start"
+end sub
+
+function indexOfStreamId(streamId as string) as integer
+    if streamId = "" then return -1
+    for i = 0 to m.channels.Count() - 1
+        if streamIdOf(m.channels[i]) = streamId then return i
+    end for
+    return -1
+end function
+
+' Background liveness sweep; BaseScreen runs it.
+sub startProbe()
+    auth = m.global.auth
+    targets = []
+    limit = m.channels.Count()
+    if limit > PROBE_MAX then limit = PROBE_MAX
+    for i = 0 to limit - 1
+        id = streamIdOf(m.channels[i])
+        if id <> "" then targets.Push({ streamId: "live:" + id, url: Xtream.liveStreamUrl(auth, id) })
+    end for
+    startSweep(targets)
+end sub
+
+sub onSweepProgress(done as integer, total as integer)
+    if total = 0
+        m.title.text = m.titleBase
+    else
+        m.title.text = m.titleBase + "  ·  checking " + done.ToStr() + "/" + total.ToStr()
+    end if
+end sub
+
+sub onSweepDone()
+    rebuildChannels(focusedStreamId())
+end sub
+
+sub onVisibleChanged()
+    if not m.top.visible
+        stopSweep() ' the player needs the connection more than the sweep does
+        return
+    end if
+    if m.allChannels.Count() > 0 then rebuildChannels(focusedStreamId())
+end sub
+
+' ---------- now / next ----------
+
+sub onChannelFocused()
+    m.focusIndex = m.channelsList.itemFocused
+    channel = focusedChannel()
+    if channel = invalid then return
+
+    m.epgPanel.channelName = pick(channel, "name", "")
+    m.epgPanel.hint = ""
+    if Xtream.toInt(pick(channel, "tv_archive", 0)) = 1 then m.epgPanel.hint = "Press Play for catch-up"
+
+    cached = cachedEpg(streamIdOf(channel))
+    if cached <> invalid
+        m.epgTimer.control = "stop"
+        applyEpg(cached)
+        return
+    end if
+
+    m.epgPanel.epg = {}
+    m.epgTimer.control = "stop"
+    m.epgTimer.control = "start" ' debounce: only the row you settle on is fetched
+end sub
+
+sub onEpgTimer()
+    channel = focusedChannel()
+    if channel = invalid then return
+    m.epgPendingId = streamIdOf(channel)
+    apiRequest("get_short_epg", { stream_id: m.epgPendingId, limit: 2 }, "onEpg")
+end sub
+
+sub onEpg(event as object)
+    res = event.getData()
+    if not res.ok
+        Log.error("LiveScreen", "EPG: " + res.error)
+        return
+    end if
+
+    streamId = m.epgPendingId
+    listings = pick(res.data, "epg_listings", [])
+    m.epgCache[streamId] = { at: Uptime(0), listings: listings }
+
+    ' Fill in the row's now-playing line even if focus has already moved on.
+    now = ""
+    if listings.Count() > 0 then now = Xtream.decodeBase64(pick(listings[0], "title", ""))
+    setRowNowTitle(streamId, now)
+
+    channel = focusedChannel()
+    if channel <> invalid and streamIdOf(channel) = streamId then applyEpg(listings)
+end sub
+
+function cachedEpg(streamId as string) as object
+    entry = m.epgCache[streamId]
+    if entry = invalid then return invalid
+    if Uptime(0) - entry.at > EPG_CACHE_SECONDS then return invalid
+    return entry.listings
+end function
+
+sub applyEpg(listings as object)
+    if listings.Count() = 0
+        m.epgPanel.notice = "No programme information"
+    else
+        m.epgPanel.epg = Xtream.nowNext(listings)
+    end if
+end sub
+
+sub clearInfo()
+    m.epgPanel.channelName = ""
+    m.epgPanel.hint = ""
+    m.epgPanel.epg = {}
+end sub
+
+sub setRowNowTitle(streamId as string, title as string)
+    if m.channelContent = invalid or title = "" then return
+    for i = 0 to m.channels.Count() - 1
+        if i >= m.channelContent.getChildCount() then return
+        if streamIdOf(m.channels[i]) = streamId
+            m.channelContent.getChild(i).nowTitle = title
+            return
+        end if
+    end for
+end sub
+
+' ---------- playback ----------
+
+sub onChannelSelected()
+    index = m.channelsList.itemSelected
+    channel = channelAt(index)
+    if channel = invalid then return
+
+    stopSweep() ' free the line before we ask it for a stream
+    window = playlistWindow(index)
+    navigateTo("PlayerScreen", {
+        url: Xtream.liveStreamUrl(m.global.auth, streamIdOf(channel))
+        title: pick(channel, "name", "")
+        streamFormat: "hls"
+        isLive: true
+        playlist: window.list
+        playlistIndex: window.index
+    })
+end sub
+
+' A slice of the category around the selected channel, as { list, index }.
+function playlistWindow(selectedIndex as integer) as object
+    first = selectedIndex - PLAYLIST_SPAN
+    if first < 0 then first = 0
+    last = first + PLAYLIST_SPAN * 2
+    if last > m.channels.Count() then last = m.channels.Count()
+
+    auth = m.global.auth
+    list = []
+    for i = first to last - 1
+        raw = m.channels[i]
+        id = streamIdOf(raw)
+        list.Push({
+            streamId: "live:" + id
+            name: pick(raw, "name", "")
+            num: Xtream.toStr(pick(raw, "num", (i + 1).ToStr()))
+            url: Xtream.liveStreamUrl(auth, id)
+            streamFormat: "hls"
+        })
+    end for
+    return { list: list, index: selectedIndex - first }
+end function
+
+' ---------- catch-up ----------
+sub openCatchup(channel as object)
+    m.catchup.channel = { streamId: streamIdOf(channel), name: pick(channel, "name", "") }
+end sub
+
+sub onCatchupPlay(event as object)
+    request = event.getData()
+    if request = invalid then return
+    m.channelsList.setFocus(true)
+    navigateTo("PlayerScreen", {
+        url: request.url
+        title: request.title
+        streamFormat: "hls"
+        isLive: false
+    })
+end sub
+
+sub onCatchupFailed(event as object)
+    m.catchup.dismiss = true
+    m.channelsList.setFocus(true)
+    showToast(event.getData())
+end sub
+
+' ---------- favorites and locking ----------
+sub toggleChannelFavorite()
+    channel = focusedChannel()
+    if channel = invalid then return
+    toggleFavorite("live:" + streamIdOf(channel), pick(channel, "name", ""))
+end sub
+
+sub toggleCategoryLock()
+    index = m.categoriesList.itemFocused
+    if index < 0 or index >= m.categories.Count() then return
+    cat = m.categories[index]
+    name = pick(cat, "category_name", "")
+
+    if Xtream.isAdultName(name)
+        showToast(name + " is always locked")
+        return
+    end if
+    if Xtream.toStr(pick(cat, "category_id", "")) = ""
+        showToast("Lock individual categories rather than All or Favorites")
+        return
+    end if
+
+    m.lockIndex = index
+    requestLockToggle(categoryKey(cat), name)
+end sub
+
+' Overrides BaseScreen: redraw the category list once a lock has changed.
+sub onLockChanged()
+    buildCategoryList()
+    m.categoriesList.jumpToItem = m.lockIndex
+end sub
+
+' Overrides BaseScreen: hidden channels came back, so redraw the list.
+sub onHiddenCleared()
+    rebuildChannels(focusedStreamId())
+end sub
+
+function focusedChannel() as object
+    return channelAt(m.focusIndex)
+end function
+
+function focusedStreamId() as string
+    channel = focusedChannel()
+    if channel = invalid then return ""
+    return streamIdOf(channel)
+end function
+
+function channelAt(index as integer) as object
+    if index < 0 or index >= m.channels.Count() then return invalid
+    return m.channels[index]
+end function
+
+function streamIdOf(channel as object) as string
+    return Xtream.toStr(pick(channel, "stream_id", ""))
+end function
+
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+
+    if m.catchup.open
+        if key = "back"
+            m.catchup.dismiss = true
+            m.channelsList.setFocus(true)
+            return true
+        end if
+        return false
+    end if
+
+    if key = "right" and m.categoriesList.hasFocus() and m.channels.Count() > 0
+        m.channelsList.setFocus(true)
+        return true
+    else if key = "left" and m.channelsList.hasFocus()
+        m.categoriesList.setFocus(true)
+        return true
+    else if key = "options" and m.channelsList.hasFocus()
+        toggleChannelFavorite()
+        return true
+    else if key = "options" and m.categoriesList.hasFocus()
+        toggleCategoryLock()
+        return true
+    else if key = "play" and m.channelsList.hasFocus()
+        channel = focusedChannel()
+        if channel <> invalid and Xtream.toInt(pick(channel, "tv_archive", 0)) = 1 then openCatchup(channel)
+        return true
+    else if key = "replay" or key = "instantreplay"
+        ' On the category pane the same button brings hidden channels back.
+        if m.categoriesList.hasFocus()
+            confirmShowHidden()
+        else if sweepRunning()
+            stopSweep()
+        else
+            startProbe()
+        end if
+        return true
+    end if
+
+    return false
+end function

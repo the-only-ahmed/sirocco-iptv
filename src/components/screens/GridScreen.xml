@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- params: { type: "live"|"vod"|"series", categoryId: string, title: string } -->
+<component name="GridScreen" extends="BaseScreen">
+  <children>
+    <Label id="title" text="" translation="[120, 100]" font="font:LargeBoldSystemFont" color="#FFFFFF" />
+    <Label id="count" text="" translation="[120, 165]" font="font:SmallestSystemFont" color="#8A93A6" />
+    <MarkupGrid id="grid" translation="[120, 220]"
+                itemComponentName="PosterItem"
+                itemSize="[240, 370]" itemSpacing="[16, 24]"
+                numColumns="7" numRows="2"
+                drawFocusFeedback="true" />
+    <!-- Posters are added in slices so a 10k-item category opens instead of freezing -->
+    <Timer id="buildTimer" repeat="false" duration="0.05" />
+  </children>
+  <script type="text/brighterscript" uri="GridScreen.bs" />
+</component>

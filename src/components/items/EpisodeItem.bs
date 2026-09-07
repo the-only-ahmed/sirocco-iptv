@@ -1,0 +1,30 @@
+sub init()
+    m.bg = m.top.findNode("bg")
+    m.thumb = m.top.findNode("thumb")
+    m.name = m.top.findNode("name")
+    m.plot = m.top.findNode("plot")
+    m.progressBg = m.top.findNode("progressBg")
+    m.progress = m.top.findNode("progress")
+end sub
+
+sub onContentChanged()
+    content = m.top.itemContent
+    if content = invalid then return
+
+    m.name.text = content.title
+    m.plot.text = content.plotLine
+
+    uri = content.HDPOSTERURL
+    if uri = "" then uri = "pkg:/images/placeholder.png"
+    m.thumb.uri = uri
+
+    ' A bar under the thumbnail for anything left part-watched.
+    watched = content.progress
+    m.progressBg.visible = (watched > 0)
+    m.progress.visible = (watched > 0)
+    m.progress.width = m.progressBg.width * watched
+end sub
+
+sub onFocusChanged()
+    m.bg.opacity = m.top.focusPercent
+end sub

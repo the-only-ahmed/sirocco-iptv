@@ -1,0 +1,15 @@
+node_modules/
+build/
+.DS_Store
+*.zip
+*.pkg
+out/
+.env
+.claude*
+.vscode*
+*.md
+.DS_Store
+production/
+.env
+package-lock.json
+!README.md

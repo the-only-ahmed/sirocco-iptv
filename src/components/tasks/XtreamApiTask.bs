@@ -1,0 +1,145 @@
+import "pkg:/source/lib/Xtream.bs"
+import "pkg:/source/lib/Log.bs"
+
+const REQUEST_TIMEOUT_MS = 30000
+
+' cachefs:/ survives app restarts (the OS may evict it); tmp:/ is the fallback when it is not writable.
+const CACHE_DIR = "cachefs:/"
+const CACHE_FALLBACK_DIR = "tmp:/"
+
+sub init()
+    m.top.functionName = "execute"
+end sub
+
+sub execute()
+    auth = m.global.auth
+    if auth = invalid or auth.baseUrl = invalid or auth.baseUrl = ""
+        m.top.response = { ok: false, error: "Not authenticated" }
+        return
+    end if
+
+    params = m.top.params
+    if params = invalid then params = {}
+    action = m.top.action
+
+    ttl = cacheTtl(action)
+    key = cacheKey(auth, action, params)
+    if ttl > 0 and not m.top.refresh
+        cached = readCache(key, ttl)
+        if cached <> invalid
+            Log.info("XtreamApiTask", "cache hit " + key)
+            m.top.response = { ok: true, data: cached, fromCache: true }
+            return
+        end if
+    end if
+
+    url = Xtream.apiUrl(auth, action, params)
+    Log.info("XtreamApiTask", "GET " + url)
+
+    xfer = CreateObject("roUrlTransfer")
+    xfer.SetUrl(url)
+    xfer.SetCertificatesFile("common:/certs/ca-bundle.crt")
+    xfer.InitClientCertificates()
+    xfer.RetainBodyOnError(true)
+    xfer.AddHeader("User-Agent", Xtream.userAgent())
+    xfer.AddHeader("Accept", "application/json")
+
+    port = CreateObject("roMessagePort")
+    xfer.SetMessagePort(port)
+
+    if not xfer.AsyncGetToString()
+        m.top.response = { ok: false, error: "Could not start request" }
+        return
+    end if
+
+    msg = wait(REQUEST_TIMEOUT_MS, port)
+    if msg = invalid
+        xfer.AsyncCancel()
+        m.top.response = { ok: false, error: "Request timed out" }
+        return
+    end if
+
+    if type(msg) <> "roUrlEvent"
+        m.top.response = { ok: false, error: "Unexpected event " + type(msg) }
+        return
+    end if
+
+    code = msg.GetResponseCode()
+    if code <> 200
+        reason = msg.GetFailureReason()
+        Log.error("XtreamApiTask", "HTTP " + code.ToStr() + " " + reason)
+        m.top.response = { ok: false, error: "HTTP " + code.ToStr() + ": " + reason }
+        return
+    end if
+
+    body = msg.GetString()
+    data = ParseJson(body)
+    if data = invalid
+        m.top.response = { ok: false, error: "Server returned invalid JSON" }
+        return
+    end if
+
+    if ttl > 0 then writeCache(key, body)
+    m.top.response = { ok: true, data: data, fromCache: false }
+end sub
+
+' ---------- response cache ----------
+
+' Seconds a response stays usable. 0 means never cache: live-ish or account-specific answers.
+function cacheTtl(action as string) as integer
+    if action = "get_live_categories" or action = "get_vod_categories" or action = "get_series_categories" then return 21600
+    if action = "get_live_streams" or action = "get_vod_streams" or action = "get_series" then return 21600
+    if action = "get_vod_info" or action = "get_series_info" then return 3600
+    return 0 ' login, get_short_epg, get_simple_data_table
+end function
+
+' Account + action + params, flattened to something safe to use as a filename.
+function cacheKey(auth as object, action as string, params as object) as string
+    names = []
+    for each name in params
+        names.Push(name)
+    end for
+    names.Sort()
+
+    key = "xc_" + safeName(auth.username) + "_" + safeName(action)
+    for each name in names
+        key += "_" + safeName(name) + "-" + safeName(Xtream.toStr(params[name]))
+    end for
+    return key + ".json"
+end function
+
+function safeName(value as dynamic) as string
+    s = Xtream.toStr(value)
+    out = ""
+    for i = 1 to Len(s)
+        ch = Mid(s, i, 1)
+        lower = LCase(ch)
+        if (ch >= "0" and ch <= "9") or (lower >= "a" and lower <= "z") then out += ch
+    end for
+    return out
+end function
+
+' Files are "<epoch>\n<body>" so the age travels with the data - no reliance on filesystem times.
+function readCache(key as string, ttl as integer) as object
+    for each dir in [CACHE_DIR, CACHE_FALLBACK_DIR]
+        content = ReadAsciiFile(dir + key)
+        if content <> ""
+            split = Instr(1, content, Chr(10))
+            if split > 1
+                writtenAt = Val(Left(content, split - 1), 10)
+                if CreateObject("roDateTime").AsSeconds() - writtenAt <= ttl
+                    return ParseJson(Mid(content, split + 1))
+                end if
+            end if
+        end if
+    end for
+    return invalid
+end function
+
+sub writeCache(key as string, body as string)
+    stamped = CreateObject("roDateTime").AsSeconds().ToStr() + Chr(10) + body
+    if WriteAsciiFile(CACHE_DIR + key, stamped) then return
+    if not WriteAsciiFile(CACHE_FALLBACK_DIR + key, stamped)
+        Log.error("XtreamApiTask", "could not cache " + key)
+    end if
+end sub

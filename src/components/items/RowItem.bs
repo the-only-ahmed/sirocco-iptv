@@ -1,0 +1,36 @@
+' How much a focused cell grows.
+const FOCUS_SCALE = 0.08
+
+sub init()
+    m.scaler = m.top.findNode("scaler")
+    m.tile = m.top.findNode("tile")
+    m.poster = m.top.findNode("poster")
+    m.tileText = m.top.findNode("tileText")
+    m.caption = m.top.findNode("caption")
+end sub
+
+sub onContentChanged()
+    content = m.top.itemContent
+    if content = invalid then return
+
+    uri = content.HDPOSTERURL
+    if uri <> ""
+        m.poster.uri = uri
+        m.poster.visible = true
+        m.tileText.visible = false
+        m.caption.text = content.title
+    else
+        ' No artwork (live categories): the tile carries the name instead of a caption under it.
+        m.poster.visible = false
+        m.tileText.text = content.title
+        m.tileText.visible = true
+        m.caption.text = ""
+    end if
+end sub
+
+sub onFocusChanged()
+    scale = 1 + FOCUS_SCALE * m.top.focusPercent
+    m.scaler.scale = [scale, scale]
+    m.tile.color = "#151B2B"
+    if m.top.focusPercent > 0.5 then m.tile.color = "#1E2740"
+end sub

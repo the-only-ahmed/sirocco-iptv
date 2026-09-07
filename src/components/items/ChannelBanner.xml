@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Live channel banner for PlayerScreen: number, name, now/next, progress. Owns its own auto-hide.
+    channel = { num, name }              show the banner for this channel
+    epg     = Xtream.nowNext(listings)   fill in now/next once the EPG arrives
+    message = "..."                      one-line notice instead of a channel (e.g. number not found)
+-->
+<component name="ChannelBanner" extends="Group">
+  <interface>
+    <field id="channel" type="assocarray" alwaysNotify="true" onChange="onChannel" />
+    <field id="epg" type="assocarray" alwaysNotify="true" onChange="onEpg" />
+    <field id="message" type="string" alwaysNotify="true" onChange="onMessage" />
+  </interface>
+  <children>
+    <Group id="body" visible="false">
+      <Rectangle width="1680" height="180" color="#0B0F19" opacity="0.85" />
+      <Label id="num" translation="[30, 24]" width="140" height="60" horizAlign="right"
+             font="font:LargeBoldSystemFont" color="#6366F1" />
+      <Label id="name" translation="[200, 24]" width="1440" height="50"
+             font="font:LargeBoldSystemFont" color="#FFFFFF" />
+      <Label id="now" translation="[200, 84]" width="1440" height="30"
+             font="font:MediumSystemFont" color="#D5DAE5" />
+      <Rectangle id="progressBg" translation="[200, 122]" width="1440" height="6" color="#151B2B" />
+      <Rectangle id="progress" translation="[200, 122]" width="0" height="6" color="#6366F1" />
+      <Label id="next" translation="[200, 138]" width="1440" height="28"
+             font="font:SmallestSystemFont" color="#8A93A6" />
+    </Group>
+    <Timer id="hideTimer" repeat="false" duration="4" />
+  </children>
+  <script type="text/brighterscript" uri="ChannelBanner.bs" />
+</component>

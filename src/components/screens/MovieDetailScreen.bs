@@ -1,0 +1,180 @@
+import "pkg:/source/lib/Xtream.bs"
+import "pkg:/source/lib/Registry.bs"
+
+sub init()
+    m.backdrop = m.top.findNode("backdrop")
+    m.poster = m.top.findNode("poster")
+    m.titleLabel = m.top.findNode("title")
+    m.meta = m.top.findNode("meta")
+    m.plot = m.top.findNode("plot")
+    m.cast = m.top.findNode("cast")
+    m.buttons = m.top.findNode("buttons")
+
+    m.streamId = ""
+    m.progressId = ""
+    m.ext = "mp4"
+    m.actions = []
+    m.resumeAt = 0
+
+    m.buttons.observeField("itemSelected", "onButtonSelected")
+    m.top.observeField("params", "onParams")
+    m.top.observeField("visible", "onVisibleChanged")
+    m.defaultFocus = m.buttons
+end sub
+
+sub onParams()
+    p = m.top.params
+    m.streamId = Xtream.toStr(pick(p, "streamId", ""))
+    m.progressId = "vod:" + m.streamId
+    m.ext = Xtream.toStr(pick(p, "ext", "mp4"))
+
+    ' Draw what the grid already knew, so the screen is never blank while get_vod_info loads.
+    m.titleLabel.text = Xtream.toStr(pick(p, "title", ""))
+    m.poster.uri = Xtream.toStr(pick(p, "poster", ""))
+    buildButtons()
+
+    setLoading(true)
+    apiRequest("get_vod_info", { vod_id: m.streamId }, "onInfo")
+end sub
+
+' Coming back from the player: the resume point has almost certainly changed.
+sub onVisibleChanged()
+    if m.top.visible and m.streamId <> "" then buildButtons()
+end sub
+
+sub onInfo(event as object)
+    setLoading(false)
+    res = event.getData()
+    if not res.ok
+        showError(res.error)
+        return
+    end if
+
+    info = pick(res.data, "info", {})
+    m.plot.text = Xtream.toStr(pick(info, "plot", ""))
+    m.meta.text = metaLine(info)
+    m.backdrop.uri = firstBackdrop(info)
+
+    director = Xtream.toStr(pick(info, "director", ""))
+    castList = Xtream.toStr(pick(info, "cast", ""))
+    line = ""
+    if castList <> "" then line = "Cast: " + castList
+    if director <> ""
+        if line <> "" then line += "   ·   "
+        line += "Director: " + director
+    end if
+    m.cast.text = line
+
+    ' movie_data carries the authoritative container; the grid's guess can be wrong.
+    ext = Xtream.toStr(pick(pick(res.data, "movie_data", {}), "container_extension", ""))
+    if ext <> "" then m.ext = ext
+end sub
+
+function metaLine(info as object) as string
+    parts = []
+    for each field in ["releasedate", "genre", "duration", "rating"]
+        value = Xtream.toStr(pick(info, field, ""))
+        if value <> "" then parts.Push(value)
+    end for
+
+    out = ""
+    for each part in parts
+        if out <> "" then out += "   ·   "
+        out += part
+    end for
+    if not Xtream.isPlayableExt(m.ext)
+        if out <> "" then out += "   ·   "
+        out += "format not supported on Roku"
+    end if
+    return out
+end function
+
+' backdrop_path is an array on most panels and a bare string on some.
+function firstBackdrop(info as object) as string
+    value = pick(info, "backdrop_path", invalid)
+    if value = invalid then return ""
+    if GetInterface(value, "ifArray") <> invalid
+        if value.Count() = 0 then return ""
+        return Xtream.toStr(value[0])
+    end if
+    return Xtream.toStr(value)
+end function
+
+' ---------- buttons ----------
+
+sub buildButtons()
+    progress = Registry.readProgress(m.progressId)
+    m.resumeAt = 0
+    if progress <> invalid then m.resumeAt = progress.position
+
+    m.actions = []
+    content = CreateObject("roSGNode", "ContentNode")
+
+    if m.resumeAt > 0
+        addButton(content, "Resume at " + clock(m.resumeAt), "resume")
+        addButton(content, "Play from start", "play")
+    else
+        addButton(content, "Play", "play")
+    end if
+
+    if Registry.isFavorite(m.progressId)
+        addButton(content, "Remove from favorites", "favorite")
+    else
+        addButton(content, "Add to favorites", "favorite")
+    end if
+
+    m.buttons.content = content
+    ' Rebuilt whenever the resume point changes, so take the focus back each time.
+    if m.top.isInFocusChain() then m.buttons.setFocus(true)
+end sub
+
+sub addButton(content as object, label as string, action as string)
+    button = content.createChild("ContentNode")
+    button.title = label
+    m.actions.Push(action)
+end sub
+
+sub onButtonSelected()
+    index = m.buttons.itemSelected
+    if index < 0 or index >= m.actions.Count() then return
+    action = m.actions[index]
+
+    if action = "favorite"
+        Registry.toggleFavorite(m.progressId)
+        buildButtons()
+        return
+    end if
+
+    startAt = 0
+    if action = "resume" then startAt = m.resumeAt
+    play(startAt)
+end sub
+
+sub play(startAt as integer)
+    p = m.top.params
+    navigateTo("PlayerScreen", {
+        url: Xtream.vodStreamUrl(m.global.auth, m.streamId, m.ext)
+        title: m.titleLabel.text
+        streamFormat: Xtream.streamFormatForExt(m.ext)
+        isLive: false
+        progressId: m.progressId
+        startPosition: startAt
+        playlist: pick(p, "playlist", [])
+        playlistIndex: Xtream.toInt(pick(p, "playlistIndex", -1))
+    })
+end sub
+
+' 3725 -> "1:02:05"
+function clock(seconds as integer) as string
+    hours = Int(seconds / 3600)
+    minutes = Int((seconds mod 3600) / 60)
+    secs = seconds mod 60
+    out = pad(minutes) + ":" + pad(secs)
+    if hours > 0 then out = hours.ToStr() + ":" + out
+    return out
+end function
+
+function pad(value as integer) as string
+    if value < 10 then return "0" + value.ToStr()
+    return value.ToStr()
+end function

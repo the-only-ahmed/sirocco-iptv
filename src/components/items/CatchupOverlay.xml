@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Catch-up archive for one channel. Owns its own request and list.
+    channel = { streamId, name }   opens the overlay and loads the archive
+    play    = { url, title }       a programme was chosen
+    failed  = "reason"             nothing to show
+  open    = true while the overlay is showing
+  dismiss = true closes it (the screen does this on Back)
+-->
+<component name="CatchupOverlay" extends="Group">
+  <interface>
+    <field id="channel" type="assocarray" alwaysNotify="true" onChange="onChannel" />
+    <field id="play" type="assocarray" alwaysNotify="true" />
+    <field id="failed" type="string" alwaysNotify="true" />
+    <!-- Fields, not functions: a component's functions cannot be called from another component -->
+    <field id="open" type="boolean" value="false" />
+    <field id="dismiss" type="boolean" alwaysNotify="true" onChange="onDismiss" />
+  </interface>
+  <children>
+    <Group id="body" visible="false">
+      <Rectangle width="1290" height="800" color="#0B0F19" opacity="0.96" />
+      <Label id="heading" translation="[20, 16]" width="1250" height="40"
+             font="font:MediumBoldSystemFont" color="#FFFFFF" />
+      <LabelList id="list" translation="[20, 72]" itemSize="[1250, 56]" numRows="12"
+                 color="#8A93A6" focusedColor="#FFFFFF" />
+    </Group>
+  </children>
+  <script type="text/brighterscript" uri="CatchupOverlay.bs" />
+</component>

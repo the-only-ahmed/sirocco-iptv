@@ -1,0 +1,375 @@
+import "pkg:/source/lib/Log.bs"
+
+import "pkg:/source/lib/Registry.bs"
+import "pkg:/source/lib/Xtream.bs"
+
+sub init()
+    m.loadingLabel = m.top.findNode("loadingLabel")
+    m.defaultFocus = invalid
+    m.activeTask = invalid
+    m.errorDialog = invalid
+    m.hiddenDialog = invalid
+    m.pendingLockKey = ""
+    m.pendingLockName = ""
+    m.numberPurpose = ""
+    m.textDialog = invalid
+    m.sweepTask = invalid
+    m.sweepTotal = 0
+    m.top.observeField("focusedChild", "baseOnFocusedChild")
+    m.top.observeField("dispose", "baseOnDispose")
+end sub
+
+' When MainScene focuses the screen itself, forward focus to the screen's main control.
+sub baseOnFocusedChild()
+    if m.top.hasFocus() and m.defaultFocus <> invalid
+        m.defaultFocus.setFocus(true)
+    end if
+end sub
+
+sub baseOnDispose()
+    if m.activeTask <> invalid
+        m.activeTask.control = "STOP"
+        m.activeTask = invalid
+    end if
+end sub
+
+' ---------- helpers available to every screen ----------
+
+sub navigateTo(screen as string, params = {} as object, replace = false as boolean)
+    m.top.navigate = { screen: screen, params: params, replace: replace }
+end sub
+
+sub closeScreen()
+    m.top.close = true
+end sub
+
+sub setLoading(isLoading as boolean)
+    m.loadingLabel.visible = isLoading
+end sub
+
+' Fire one Xtream API call. callback(event) receives event.getData() = { ok, data | error }.
+sub apiRequest(action as string, params as object, callback as string)
+    task = CreateObject("roSGNode", "XtreamApiTask")
+    task.action = action
+    task.params = params
+    task.observeField("response", callback)
+    task.control = "RUN"
+    m.activeTask = task
+end sub
+
+sub showError(message as string, title = "Error" as string)
+    Log.error("Screen", message)
+    dialog = CreateObject("roSGNode", "Dialog")
+    dialog.title = title
+    dialog.message = message
+    dialog.buttons = ["OK"]
+    ' A Dialog only sets wasClosed when it is dismissed (Back, or close = true). Pressing a button
+    ' fires buttonSelected and leaves the dialog up, so close it ourselves.
+    dialog.observeField("buttonSelected", "baseOnErrorDialogButton")
+    dialog.observeField("wasClosed", "onErrorDialogClosed")
+    m.errorDialog = dialog
+    m.top.getScene().dialog = dialog
+end sub
+
+' A dialog that just says something. Unlike showError() the screen stays put when it is dismissed.
+sub showInfo(message as string, title = "Info" as string)
+    dialog = CreateObject("roSGNode", "Dialog")
+    dialog.title = title
+    dialog.message = message
+    dialog.buttons = ["OK"]
+    dialog.observeField("buttonSelected", "dismissDialog")
+    dialog.observeField("wasClosed", "dismissDialog")
+    m.top.getScene().dialog = dialog
+end sub
+
+' Screens may override to also drop their own dialog references (PlayerScreen does).
+sub dismissDialog()
+    scene = m.top.getScene()
+    if scene <> invalid then scene.dialog = invalid
+    if m.defaultFocus <> invalid then m.defaultFocus.setFocus(true)
+end sub
+
+sub baseOnErrorDialogButton()
+    if m.errorDialog = invalid then return
+    m.errorDialog.close = true ' fires wasClosed -> onErrorDialogClosed
+    m.errorDialog = invalid
+end sub
+
+' Called when the showError dialog is dismissed. Screens may override (PlayerScreen closes itself).
+sub onErrorDialogClosed()
+    if m.defaultFocus <> invalid then m.defaultFocus.setFocus(true)
+end sub
+
+' ---------- toast, favorites, parental PIN ----------
+
+' Toast and NumberPad live on the scene, above every screen. findNode reaches them from here.
+sub showToast(message as string)
+    toast = sceneNode("toast")
+    if toast <> invalid then toast.message = message
+end sub
+
+function sceneNode(id as string) as object
+    scene = m.top.getScene()
+    if scene = invalid then return invalid
+    return scene.findNode(id)
+end function
+
+' id = "vod:123" / "live:45" / "series:7". Says what happened without a dialog to dismiss.
+sub toggleFavorite(id as string, name as string)
+    if Registry.toggleFavorite(id)
+        showToast("★  " + name + " added to favorites")
+    else
+        showToast(name + " removed from favorites")
+    end if
+end sub
+
+' Locked by name (adult / xxx …) or by the viewer's own choice. key = "live:5" etc.
+function isLockedCategory(key as string, name as string) as boolean
+    if Xtream.isAdultName(name) then return true
+    return Registry.lockedCategories().DoesExist(key)
+end function
+
+' Locking and unlocking both need the PIN. Screens override onLockChanged() to redraw their list.
+sub requestLockToggle(key as string, name as string)
+    m.pendingLockKey = key
+    m.pendingLockName = name
+    requirePin()
+end sub
+
+sub onLockChanged()
+end sub
+
+' Modal text entry. StandardKeyboardDialog supports voice entry (certification requirement 4.12);
+' KeyboardDialog is the deprecated fallback for firmware without it. Every field is probed with
+' hasField() first - stock nodes have differed from their documentation more than once here.
+' The answer arrives at the screen's onTextEntered(); a cancel delivers nothing.
+sub askText(title as string, value as string)
+    dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
+    if dialog = invalid then dialog = CreateObject("roSGNode", "KeyboardDialog")
+    if dialog = invalid then return
+
+    dialog.title = title
+    if dialog.hasField("text") then dialog.text = value
+    if dialog.hasField("buttons") then dialog.buttons = ["OK", "Cancel"]
+    dialog.observeField("buttonSelected", "baseOnTextButton")
+    dialog.observeField("wasClosed", "baseOnTextClosed")
+    m.textDialog = dialog
+    m.top.getScene().dialog = dialog
+
+    ' Setting the text parks the cursor at 0, in front of "http://". Put it at the end so typing
+    ' appends and Backspace removes the last character.
+    if not dialog.hasField("keyboard") then return
+    keyboard = dialog.keyboard
+    if keyboard = invalid or not keyboard.hasField("textEditBox") then return
+    if keyboard.textEditBox <> invalid then keyboard.textEditBox.cursorPosition = Len(value)
+end sub
+
+sub baseOnTextButton()
+    if m.textDialog = invalid then return
+    accepted = (m.textDialog.buttonSelected = 0)
+    entered = ""
+    if m.textDialog.hasField("text") then entered = m.textDialog.text
+
+    m.textDialog.close = true
+    if accepted then onTextEntered(entered)
+end sub
+
+sub baseOnTextClosed()
+    m.textDialog = invalid
+    if m.defaultFocus <> invalid then m.defaultFocus.setFocus(true)
+end sub
+
+' Screens override this to receive what was typed.
+sub onTextEntered(value as string)
+    Log.info("Screen", "text entered: " + value) ' only reached if not overridden
+end sub
+
+' Modal digit entry. purpose "" is delivered to the screen's onNumberEntered(); anything else is
+' handled here. Returns "" when cancelled.
+sub askNumber(title as string, masked as boolean, purpose = "" as string)
+    numberPad = sceneNode("numberPad")
+    if numberPad = invalid then return
+
+    m.numberPurpose = purpose
+    ' One modal at a time: drop whichever screen asked last, then listen for this answer.
+    numberPad.unobserveField("entered")
+    numberPad.observeField("entered", "baseOnNumberEntered")
+    numberPad.prompt = { title: title, masked: masked }
+end sub
+
+sub baseOnNumberEntered(event as object)
+    value = event.getData()
+    purpose = m.numberPurpose
+    m.numberPurpose = ""
+    if m.defaultFocus <> invalid then m.defaultFocus.setFocus(true)
+
+    if purpose = "pin"
+        checkPin(value)
+    else if purpose = "newPin"
+        setNewPin(value)
+    else
+        onNumberEntered(value)
+    end if
+end sub
+
+' Screens override this for their own number prompts.
+sub onNumberEntered(value as string)
+    Log.info("Screen", "number entered: " + value) ' only reached if not overridden
+end sub
+
+' Asks for the parental PIN, then continues through onPinSatisfied(). The first time, the PIN
+' entered becomes the PIN. There is no grace period on purpose: a PIN that keeps you unlocked for
+' a while protects nothing once the parent walks away from an app that is already open.
+sub requirePin()
+
+    title = "Parental PIN"
+    if Registry.parentalPin() = "" then title = "Create a parental PIN (4 digits)"
+    askNumber(title, true, "pin")
+end sub
+
+sub checkPin(entered as string)
+    if entered = "" ' cancelled
+        m.pendingLockKey = ""
+        return
+    end if
+    if Len(entered) < 4
+        m.pendingLockKey = ""
+        showToast("A PIN needs 4 digits")
+        return
+    end if
+
+    stored = Registry.parentalPin()
+    if stored = ""
+        Registry.setParentalPin(entered)
+        showToast("Parental PIN set")
+    else if entered <> stored
+        m.pendingLockKey = ""
+        showToast("Wrong PIN")
+        return
+    end if
+    onPinSatisfied()
+end sub
+
+' Settings uses this to replace the PIN once the old one has been accepted.
+sub setNewPin(entered as string)
+    if entered = "" then return
+    if Len(entered) < 4
+        showToast("A PIN needs 4 digits")
+        return
+    end if
+    Registry.setParentalPin(entered)
+    showToast("Parental PIN changed")
+end sub
+
+' Where a correct PIN leads: either the lock it was asked for, or the category it was guarding.
+sub onPinSatisfied()
+    key = m.pendingLockKey
+    name = m.pendingLockName
+    m.pendingLockKey = ""
+
+    if key <> ""
+        if Registry.toggleLockedCategory(key)
+            showToast(name + " locked")
+        else
+            showToast(name + " unlocked")
+        end if
+        onLockChanged()
+        return
+    end if
+    m.top.pinPassed = true
+end sub
+
+' Offers to clear the learned dead list. Screens override onHiddenCleared() to redraw.
+sub confirmShowHidden()
+    dialog = CreateObject("roSGNode", "Dialog")
+    dialog.title = "Hidden items"
+    dialog.message = "Show everything again, including channels and movies that failed to play?"
+    dialog.buttons = ["Show them all", "Keep hiding them"]
+    dialog.observeField("buttonSelected", "baseOnShowHiddenButton")
+    dialog.observeField("wasClosed", "dismissDialog")
+    m.hiddenDialog = dialog
+    m.top.getScene().dialog = dialog
+end sub
+
+sub baseOnShowHiddenButton()
+    if m.hiddenDialog = invalid then return
+    clear = (m.hiddenDialog.buttonSelected = 0)
+    m.hiddenDialog = invalid
+    dismissDialog()
+    if not clear then return
+
+    Registry.clearDead()
+    showToast("Hidden items restored")
+    onHiddenCleared()
+end sub
+
+sub onHiddenCleared()
+end sub
+
+' ---------- background availability sweep (shared by Live and the grids) ----------
+'
+' The account allows very few simultaneous connections, so probing is one item at a time and is
+' abandoned as soon as the viewer wants to watch something. A screen supplies targets shaped as
+' { streamId: "<kind>:<id>", url: "..." } and overrides onSweepProgress / onSweepDone.
+sub startSweep(targets as object, method = "GET" as string)
+    stopSweep()
+    if targets = invalid or targets.Count() = 0 then return
+
+    m.sweepTotal = targets.Count()
+    task = CreateObject("roSGNode", "StreamProbeTask")
+    task.targets = targets
+    task.method = method
+    task.observeField("progress", "baseOnSweepProgress")
+    task.observeField("dead", "baseOnSweepDone")
+    task.control = "RUN"
+    m.sweepTask = task
+end sub
+
+sub stopSweep()
+    if m.sweepTask = invalid then return
+    m.sweepTask.unobserveField("progress")
+    m.sweepTask.unobserveField("dead")
+    m.sweepTask.control = "STOP"
+    m.sweepTask = invalid
+    onSweepProgress(0, 0)
+end sub
+
+function sweepRunning() as boolean
+    return m.sweepTask <> invalid
+end function
+
+sub baseOnSweepProgress()
+    if m.sweepTask <> invalid then onSweepProgress(m.sweepTask.progress, m.sweepTotal)
+end sub
+
+sub baseOnSweepDone(event as object)
+    dead = event.getData()
+    m.sweepTask = invalid
+    onSweepProgress(0, 0)
+    if dead = invalid or dead.Count() = 0 then return
+
+    for each id in dead
+        Registry.markDead(id)
+    end for
+    Log.info("Screen", "sweep hid " + dead.Count().ToStr() + " items")
+    onSweepDone()
+end sub
+
+' Screens override these two; total = 0 means "no sweep running".
+sub onSweepProgress(done as integer, total as integer)
+    Log.info("Screen", "sweep " + done.ToStr() + "/" + total.ToStr()) ' only reached if not overridden
+end sub
+
+sub onSweepDone()
+end sub
+
+' Reads a field from a JSON assocarray, returning fallback when missing/invalid.
+' Panels send [] where a map is expected (an empty `info`, say) - indexing that is a hard error that
+' takes the render thread down, so anything that is not an assocarray gets the fallback.
+function pick(obj as object, key as string, fallback = "" as dynamic) as dynamic
+    if obj = invalid then return fallback
+    if GetInterface(obj, "ifAssociativeArray") = invalid then return fallback
+    v = obj[key]
+    if v = invalid then return fallback
+    return v
+end function

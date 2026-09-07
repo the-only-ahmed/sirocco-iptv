@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- params: { type: "live"|"vod"|"series", title: string } -->
+<component name="CategoryScreen" extends="BaseScreen">
+  <children>
+    <Label id="title" text="" translation="[120, 100]" font="font:LargeBoldSystemFont" color="#FFFFFF" />
+    <LabelList id="list" translation="[120, 200]" itemSize="[900, 64]" numRows="12" />
+  </children>
+  <script type="text/brighterscript" uri="CategoryScreen.bs" />
+</component>

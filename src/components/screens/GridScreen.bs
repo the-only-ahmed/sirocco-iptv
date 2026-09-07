@@ -1,0 +1,239 @@
+import "pkg:/source/lib/Xtream.bs"
+import "pkg:/source/lib/Registry.bs"
+
+' Posters added per timer tick. Big enough to fill the screen at once, small enough not to stall it.
+const BUILD_CHUNK = 200
+' Most items one sweep will check, same budget as the Live screen.
+const PROBE_MAX = 200
+' Up/Down in the player moves within a window around the selected item, not the whole category.
+const PLAYLIST_SPAN = 150
+
+sub init()
+    m.title = m.top.findNode("title")
+    m.count = m.top.findNode("count")
+    m.grid = m.top.findNode("grid")
+    m.buildTimer = m.top.findNode("buildTimer")
+
+    m.all = []
+    m.items = []
+    m.content = invalid
+    m.buildIndex = 0
+    m.titleBase = ""
+
+    m.grid.observeField("itemSelected", "onItemSelected")
+    m.buildTimer.observeField("fire", "appendChunk")
+    m.top.observeField("params", "onParams")
+    m.top.observeField("visible", "onVisibleChanged")
+    m.top.observeField("dispose", "stopSweep") ' extra observer: BaseScreen keeps its own
+    m.defaultFocus = m.grid
+end sub
+
+sub onParams()
+    p = m.top.params
+    m.buildTimer.control = "stop"
+    m.titleBase = pick(p, "title", "")
+    m.title.text = m.titleBase
+
+    actions = { live: "get_live_streams", vod: "get_vod_streams", series: "get_series" }
+    params = {}
+    if pick(p, "categoryId", "") <> "" then params.category_id = p.categoryId
+
+    setLoading(true)
+    apiRequest(actions[p.type], params, "onStreams")
+end sub
+
+sub onStreams(event as object)
+    setLoading(false)
+    res = event.getData()
+    if not res.ok
+        showError(res.error)
+        return
+    end if
+
+    m.all = res.data
+    rebuildItems()
+end sub
+
+' ---------- list building ----------
+
+' Drops anything playback or a sweep has proved dead, then fills the grid in slices so a large
+' category opens immediately instead of freezing.
+sub rebuildItems()
+    m.buildTimer.control = "stop"
+
+    dead = Registry.readDead()
+    m.items = []
+    for each raw in m.all
+        if playable(raw) and not dead.DoesExist(deadKey(raw)) then m.items.Push(raw)
+    end for
+
+    hidden = m.all.Count() - m.items.Count()
+    m.count.text = m.items.Count().ToStr() + " items"
+    if hidden > 0 then m.count.text += "   ·   " + hidden.ToStr() + " hidden (unsupported format or unavailable)"
+    if m.top.params.type = "vod" then m.count.text += "   ·   Replay checks availability"
+
+    m.content = CreateObject("roSGNode", "ContentNode")
+    m.grid.content = m.content
+    m.buildIndex = 0
+    appendChunk()
+end sub
+
+sub appendChunk()
+    limit = m.buildIndex + BUILD_CHUNK
+    if limit > m.items.Count() then limit = m.items.Count()
+    isSeries = (m.top.params.type = "series")
+
+    for i = m.buildIndex to limit - 1
+        raw = m.items[i]
+        node = m.content.createChild("ContentNode")
+        node.title = pick(raw, "name", "Untitled")
+        if isSeries
+            node.HDPOSTERURL = pick(raw, "cover", "")
+        else
+            node.HDPOSTERURL = pick(raw, "stream_icon", "")
+        end if
+    end for
+
+    m.buildIndex = limit
+    if limit < m.items.Count() then m.buildTimer.control = "start"
+end sub
+
+' Roku cannot open AVI/FLV/WMV whatever the panel says; those entries can never play.
+function playable(raw as object) as boolean
+    if m.top.params.type <> "vod" then return true
+    return Xtream.isPlayableExt(pick(raw, "container_extension", ""))
+end function
+
+' ---------- availability sweep ----------
+
+' On demand only (⟲). Unlike Live, where the sweep found plenty of dead channels, this panel serves
+' every movie it lists - so an automatic sweep would spend the single connection to learn nothing.
+' Series entries are not streams (their episodes are), so only movies can be checked at all.
+sub startProbe()
+    if m.top.params.type <> "vod" then return
+
+    auth = m.global.auth
+    targets = []
+    limit = m.items.Count()
+    if limit > PROBE_MAX then limit = PROBE_MAX
+    for i = 0 to limit - 1
+        raw = m.items[i]
+        id = Xtream.toStr(pick(raw, "stream_id", ""))
+        if id <> ""
+            ext = Xtream.toStr(pick(raw, "container_extension", "mp4"))
+            targets.Push({ streamId: "vod:" + id, url: Xtream.vodStreamUrl(auth, id, ext) })
+        end if
+    end for
+    ' RANGE: the first kilobyte is enough to know whether the file is served.
+    startSweep(targets, "RANGE")
+end sub
+
+sub onSweepProgress(done as integer, total as integer)
+    if total = 0
+        m.title.text = m.titleBase
+    else
+        m.title.text = m.titleBase + "  ·  checking " + done.ToStr() + "/" + total.ToStr()
+    end if
+end sub
+
+sub onSweepDone()
+    rebuildItems()
+end sub
+
+sub onVisibleChanged()
+    if not m.top.visible
+        stopSweep() ' the player needs the connection more than the sweep does
+        return
+    end if
+    if m.all.Count() > 0 then rebuildItems()
+end sub
+
+' ---------- selection ----------
+
+sub onItemSelected()
+    index = m.grid.itemSelected
+    if index < 0 or index >= m.items.Count() then return
+    raw = m.items[index]
+    kind = m.top.params.type
+    name = pick(raw, "name", "")
+
+    if kind = "series"
+        navigateTo("SeriesScreen", { seriesId: raw.series_id, title: name })
+        return
+    end if
+
+    stopSweep() ' free the line before we ask it for a stream
+    window = playlistWindow(index, kind)
+
+    ' Movies go through their detail screen; it carries the playlist on to the player so Up/Down
+    ' still moves through the category.
+    if kind = "vod"
+        navigateTo("MovieDetailScreen", {
+            streamId: Xtream.toStr(pick(raw, "stream_id", ""))
+            title: name
+            ext: Xtream.toStr(pick(raw, "container_extension", "mp4"))
+            poster: Xtream.toStr(pick(raw, "stream_icon", ""))
+            playlist: window.list
+            playlistIndex: window.index
+        })
+        return
+    end if
+
+    entry = playlistEntry(raw, kind)
+    navigateTo("PlayerScreen", {
+        url: entry.url
+        title: entry.name
+        streamFormat: entry.streamFormat
+        isLive: (kind = "live")
+        playlist: window.list
+        playlistIndex: window.index
+    })
+end sub
+
+' A slice of the category around the selected item, as { list, index }.
+function playlistWindow(selectedIndex as integer, kind as string) as object
+    first = selectedIndex - PLAYLIST_SPAN
+    if first < 0 then first = 0
+    last = first + PLAYLIST_SPAN * 2
+    if last > m.items.Count() then last = m.items.Count()
+
+    list = []
+    for i = first to last - 1
+        list.Push(playlistEntry(m.items[i], kind))
+    end for
+    return { list: list, index: selectedIndex - first }
+end function
+
+function playlistEntry(raw as object, kind as string) as object
+    auth = m.global.auth
+    id = Xtream.toStr(pick(raw, "stream_id", ""))
+    name = pick(raw, "name", "")
+    if kind = "live"
+        return { streamId: "live:" + id, name: name, num: Xtream.toStr(pick(raw, "num", "")), url: Xtream.liveStreamUrl(auth, id), streamFormat: "hls" }
+    end if
+    ext = Xtream.toStr(pick(raw, "container_extension", "mp4"))
+    return { streamId: "vod:" + id, progressId: "vod:" + id, name: name, num: "", url: Xtream.vodStreamUrl(auth, id, ext), streamFormat: Xtream.streamFormatForExt(ext) }
+end function
+
+function deadKey(raw as object) as string
+    if m.top.params.type = "live" then return "live:" + Xtream.toStr(pick(raw, "stream_id", ""))
+    ' Series carry series_id, and nothing marks them dead today - the lookup simply never matches.
+    if m.top.params.type = "series" then return "series:" + Xtream.toStr(pick(raw, "series_id", ""))
+    return "vod:" + Xtream.toStr(pick(raw, "stream_id", ""))
+end function
+
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+    if key = "replay" or key = "instantreplay"
+        if sweepRunning() then stopSweep() else startProbe()
+        return true
+    else if key = "options"
+        index = m.grid.itemFocused
+        if index >= 0 and index < m.items.Count()
+            raw = m.items[index]
+            toggleFavorite(deadKey(raw), pick(raw, "name", "")) ' same "<kind>:<id>" key as the blocklist
+        end if
+        return true
+    end if
+    return false
+end function

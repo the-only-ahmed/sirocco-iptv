@@ -1,0 +1,164 @@
+import "pkg:/source/lib/Xtream.bs"
+
+' Below this a search matches half the catalogue and is not worth running.
+const MIN_QUERY = 2
+' Results kept per search. The grid is a browse aid, not an exhaustive list.
+const MAX_RESULTS = 60
+
+sub init()
+    m.keyboard = m.top.findNode("keyboard")
+    m.typed = m.top.findNode("typed")
+    m.count = m.top.findNode("count")
+    m.results = m.top.findNode("results")
+    m.debounce = m.top.findNode("debounce")
+
+    m.catalogue = { live: [], vod: [], series: [] }
+    m.pending = 0
+    m.matches = []
+
+    m.keyboard.observeField("text", "onTextChanged")
+    m.results.observeField("itemSelected", "onResultSelected")
+    m.debounce.observeField("fire", "runSearch")
+    m.top.observeField("params", "onParams")
+    m.defaultFocus = m.keyboard
+end sub
+
+sub onParams()
+    ' All three come from the 6 h cache after the first visit, so this is a disk read, not a fetch.
+    setLoading(true)
+    m.pending = 3
+    apiRequest("get_live_streams", {}, "onLive")
+    apiRequest("get_vod_streams", {}, "onVod")
+    apiRequest("get_series", {}, "onSeries")
+end sub
+
+sub onLive(event as object)
+    m.catalogue.live = dataOf(event.getData())
+    catalogueLoaded()
+end sub
+
+sub onVod(event as object)
+    m.catalogue.vod = dataOf(event.getData())
+    catalogueLoaded()
+end sub
+
+sub onSeries(event as object)
+    m.catalogue.series = dataOf(event.getData())
+    catalogueLoaded()
+end sub
+
+function dataOf(res as object) as object
+    if res = invalid or not res.ok or res.data = invalid then return []
+    if GetInterface(res.data, "ifArray") = invalid then return []
+    return res.data
+end function
+
+sub catalogueLoaded()
+    m.pending -= 1
+    if m.pending > 0 then return
+    setLoading(false)
+    if m.keyboard.text <> "" then runSearch()
+end sub
+
+' ---------- searching ----------
+
+sub onTextChanged()
+    m.typed.text = m.keyboard.text
+    m.debounce.control = "stop"
+    m.debounce.control = "start"
+end sub
+
+sub runSearch()
+    query = LCase(m.keyboard.text.Trim())
+    m.matches = []
+
+    if Len(query) < MIN_QUERY
+        m.results.content = invalid
+        m.count.text = "Type at least " + MIN_QUERY.ToStr() + " letters"
+        return
+    end if
+
+    collect(query, "live", m.catalogue.live, "stream_icon")
+    collect(query, "vod", m.catalogue.vod, "stream_icon")
+    collect(query, "series", m.catalogue.series, "cover")
+
+    content = CreateObject("roSGNode", "ContentNode")
+    for each match in m.matches
+        node = content.createChild("ContentNode")
+        node.title = match.name
+        node.HDPOSTERURL = match.poster
+    end for
+    m.results.content = content
+
+    if m.matches.Count() = 0
+        m.count.text = "Nothing found for “" + m.keyboard.text + "”"
+    else
+        m.count.text = m.matches.Count().ToStr() + " results for “" + m.keyboard.text + "”"
+    end if
+end sub
+
+' Substring match on the name, which is all the panel gives us to search on.
+sub collect(query as string, kind as string, items as object, posterField as string)
+    for each raw in items
+        if m.matches.Count() >= MAX_RESULTS then return
+        name = Xtream.toStr(pick(raw, "name", ""))
+        if name <> "" and Instr(1, LCase(name), query) > 0
+            ' Movies Roku cannot open are not worth offering.
+            if kind <> "vod" or Xtream.isPlayableExt(pick(raw, "container_extension", ""))
+                m.matches.Push({ kind: kind, raw: raw, name: name, poster: Xtream.toStr(pick(raw, posterField, "")) })
+            end if
+        end if
+    end for
+end sub
+
+' ---------- opening a result ----------
+
+sub onResultSelected()
+    index = m.results.itemSelected
+    if index < 0 or index >= m.matches.Count() then return
+    match = m.matches[index]
+    raw = match.raw
+
+    if match.kind = "series"
+        navigateTo("SeriesScreen", { seriesId: raw.series_id, title: match.name })
+    else if match.kind = "vod"
+        navigateTo("MovieDetailScreen", {
+            streamId: Xtream.toStr(pick(raw, "stream_id", ""))
+            title: match.name
+            ext: Xtream.toStr(pick(raw, "container_extension", "mp4"))
+            poster: match.poster
+        })
+    else
+        navigateTo("PlayerScreen", {
+            url: Xtream.liveStreamUrl(m.global.auth, pick(raw, "stream_id", ""))
+            title: match.name
+            streamFormat: "hls"
+            isLive: true
+        })
+    end if
+end sub
+
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+
+    if key = "right" and m.keyboard.isInFocusChain() and m.matches.Count() > 0
+        m.results.setFocus(true)
+        return true
+    else if key = "left" and m.results.isInFocusChain()
+        m.keyboard.setFocus(true)
+        return true
+    else if key = "options" and m.results.isInFocusChain()
+        index = m.results.itemFocused
+        if index >= 0 and index < m.matches.Count()
+            match = m.matches[index]
+            toggleFavorite(favoriteKey(match), match.name)
+        end if
+        return true
+    end if
+    return false
+end function
+
+function favoriteKey(match as object) as string
+    if match.kind = "series" then return "series:" + Xtream.toStr(pick(match.raw, "series_id", ""))
+    return match.kind + ":" + Xtream.toStr(pick(match.raw, "stream_id", ""))
+end function

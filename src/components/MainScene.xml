@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Root scene: owns the screen stack and global auth state. -->
+<component name="MainScene" extends="Scene">
+  <interface>
+    <field id="launchArgs" type="assocarray" alwaysNotify="true" onChange="onLaunchArgs" />
+  </interface>
+  <children>
+    <Rectangle id="background" width="1920" height="1080" color="#0B0F19" />
+    <Group id="screens" />
+    <!-- Above the screen stack on purpose: a screen's own children are drawn after BaseScreen's,
+         so an overlay living in BaseScreen ends up behind them. -->
+    <Toast id="toast" translation="[610, 930]" />
+    <NumberPad id="numberPad" />
+  </children>
+  <script type="text/brighterscript" uri="MainScene.bs" />
+</component>

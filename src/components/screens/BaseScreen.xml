@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Every screen extends BaseScreen. Contract with MainScene:
+    params   : input, set right after the screen is created
+    navigate : set { screen, params, replace } to push a new screen
+    close    : set true to pop this screen
+    dispose  : MainScene sets true right before removing the screen (stop players, cancel tasks)
+  Set m.defaultFocus in init() to the node that should receive focus when the screen is shown.
+-->
+<component name="BaseScreen" extends="Group">
+  <interface>
+    <field id="params" type="assocarray" />
+    <field id="navigate" type="assocarray" alwaysNotify="true" />
+    <field id="close" type="boolean" alwaysNotify="true" />
+    <field id="dispose" type="boolean" alwaysNotify="true" />
+    <!-- Set by requirePin() once the parental PIN has been entered; screens observe it to carry on -->
+    <field id="pinPassed" type="boolean" alwaysNotify="true" />
+  </interface>
+  <children>
+    <Label id="loadingLabel" text="Loading…" visible="false" translation="[120, 990]"
+           font="font:MediumSystemFont" color="#8A93A6" />
+  </children>
+  <script type="text/brighterscript" uri="BaseScreen.bs" />
+</component>

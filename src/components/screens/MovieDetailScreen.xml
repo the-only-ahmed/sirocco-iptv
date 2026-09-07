@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  params: { streamId, title, ext, poster, playlist?, playlistIndex? }
+  Everything else comes from get_vod_info; the screen is usable before that lands.
+-->
+<component name="MovieDetailScreen" extends="BaseScreen">
+  <children>
+    <Poster id="backdrop" width="1920" height="1080" opacity="0.25" loadDisplayMode="scaleToZoom" />
+    <Rectangle width="1920" height="1080" color="#0B0F19" opacity="0.55" />
+
+    <Poster id="poster" translation="[120, 160]" width="360" height="540"
+            loadDisplayMode="scaleToZoom" loadWidth="360" loadHeight="540"
+            failedBitmapUri="pkg:/images/placeholder.png" />
+
+    <Label id="title" translation="[540, 160]" width="1260" height="60"
+           font="font:LargeBoldSystemFont" color="#FFFFFF" />
+    <Label id="meta" translation="[540, 232]" width="1260" height="30"
+           font="font:SmallestSystemFont" color="#6366F1" />
+    <Label id="plot" translation="[540, 286]" width="1260" height="220" wrap="true" maxLines="6"
+           font="font:MediumSystemFont" color="#D5DAE5" />
+    <Label id="cast" translation="[540, 520]" width="1260" height="60" wrap="true" maxLines="2"
+           font="font:SmallestSystemFont" color="#8A93A6" />
+
+    <!-- A LabelList rather than a ButtonGroup: same pattern as every other list in the app -->
+    <Rectangle translation="[540, 610]" width="520" height="230" color="#151B2B" opacity="0.85" />
+    <LabelList id="buttons" translation="[556, 622]" itemSize="[488, 66]" numRows="3"
+               color="#D5DAE5" focusedColor="#FFFFFF" />
+  </children>
+  <script type="text/brighterscript" uri="MovieDetailScreen.bs" />
+</component>

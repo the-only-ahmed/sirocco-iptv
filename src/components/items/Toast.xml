@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A one-line notice that shows itself for a moment. Set `message` to show it. -->
+<component name="Toast" extends="Group">
+  <interface>
+    <field id="message" type="string" alwaysNotify="true" onChange="onMessage" />
+  </interface>
+  <children>
+    <Group id="body" visible="false">
+      <Rectangle id="bg" width="700" height="72" color="#151B2B" opacity="0.95" />
+      <Label id="label" width="700" height="72" horizAlign="center" vertAlign="center"
+             font="font:MediumSystemFont" color="#FFFFFF" />
+    </Group>
+    <Timer id="timer" repeat="false" duration="2.5" />
+  </children>
+  <script type="text/brighterscript" uri="Toast.bs" />
+</component>
