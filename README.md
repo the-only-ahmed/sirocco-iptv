@@ -22,8 +22,6 @@ src/manifest                 channel metadata
 src/source/                  entry point + shared libs (Xtream API, registry, log)
 src/components/              SceneGraph components (router, screens, grid items, tasks)
 src/images/                  icons / splash / placeholder
-CLAUDE.md                    conventions, architecture, API reference, gotchas
-PLAN.md                      phased roadmap to a full-featured player
 ```
 
 ## Notes
