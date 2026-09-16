@@ -38,10 +38,9 @@ function accountLine() as string
     if account = invalid then return line
 
     expiry = Xtream.dateLabel(account.expDate)
-    if expiry <> "" then line += "   ·   expires " + expiry
+    if expiry <> "" then line += "   ·   " + tr("expires {date}").Replace("{date}", expiry)
     connections = Registry.number(account, "maxConnections")
-    if connections > 0 then line += "   ·   " + connections.ToStr() + " connection"
-    if connections > 1 then line += "s"
+    if connections > 0 then line += "   ·   " + Xtream.connectionsLabel(connections)
     return line
 end function
 
@@ -123,7 +122,7 @@ function wrap(kind as string, items as object, nameField as string, posterField 
     for each raw in items
         poster = ""
         if posterField <> "" then poster = Xtream.toStr(pick(raw, posterField, ""))
-        out.Push({ kind: kind, raw: raw, name: Xtream.toStr(pick(raw, nameField, "Untitled")), poster: poster })
+        out.Push({ kind: kind, raw: raw, name: Xtream.toStr(pick(raw, nameField, tr("Untitled"))), poster: poster })
     end for
     return out
 end function
@@ -132,7 +131,7 @@ sub collectFavorites(kind as string, items as object, idField as string, nameFie
     for each raw in items
         id = kind + ":" + Xtream.toStr(pick(raw, idField, ""))
         if m.favorites.DoesExist(id)
-            m.favoriteItems.Push({ kind: kind, raw: raw, name: Xtream.toStr(pick(raw, nameField, "Untitled")), poster: Xtream.toStr(pick(raw, posterField, "")) })
+            m.favoriteItems.Push({ kind: kind, raw: raw, name: Xtream.toStr(pick(raw, nameField, tr("Untitled"))), poster: Xtream.toStr(pick(raw, posterField, "")) })
         end if
     end for
 end sub
@@ -203,11 +202,11 @@ end function
 ' Rows are described rather than fixed: Continue watching and Favorites only exist some of the time.
 sub buildRows()
     m.rowSpec = []
-    if m.continueItems.Count() > 0 then m.rowSpec.Push({ label: "Continue watching", items: m.continueItems })
-    if m.favoriteItems.Count() > 0 then m.rowSpec.Push({ label: "Favorites", items: m.favoriteItems })
-    m.rowSpec.Push({ label: "Live TV", items: m.liveCategories })
-    m.rowSpec.Push({ label: "Recently added movies", items: m.recentMovies })
-    m.rowSpec.Push({ label: "Recently added series", items: m.recentSeries })
+    if m.continueItems.Count() > 0 then m.rowSpec.Push({ label: tr("Continue watching"), items: m.continueItems })
+    if m.favoriteItems.Count() > 0 then m.rowSpec.Push({ label: tr("Favorites"), items: m.favoriteItems })
+    m.rowSpec.Push({ label: tr("Live TV"), items: m.liveCategories })
+    m.rowSpec.Push({ label: tr("Recently added movies"), items: m.recentMovies })
+    m.rowSpec.Push({ label: tr("Recently added series"), items: m.recentSeries })
 
     content = CreateObject("roSGNode", "ContentNode")
     for each spec in m.rowSpec
@@ -294,9 +293,9 @@ sub onRailSelected()
     else if key = "live"
         navigateTo("LiveScreen", {})
     else if key = "vod"
-        navigateTo("CategoryScreen", { type: "vod", title: "Movies" })
+        navigateTo("CategoryScreen", { type: "vod", title: tr("Movies") })
     else if key = "series"
-        navigateTo("CategoryScreen", { type: "series", title: "Series" })
+        navigateTo("CategoryScreen", { type: "series", title: tr("Series") })
     else if key = "settings"
         navigateTo("SettingsScreen", {})
     else if key = "logout"

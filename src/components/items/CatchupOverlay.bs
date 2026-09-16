@@ -19,7 +19,7 @@ sub onChannel()
     m.channelName = Xtream.toStr(channel.name)
     m.programmes = []
     m.list.content = invalid
-    m.heading.text = "Catch-up — " + m.channelName
+    m.heading.text = tr("Catch-up — {name}").Replace("{name}", m.channelName)
 
     ' Not a screen, so no BaseScreen.apiRequest here - the task is created directly.
     task = CreateObject("roSGNode", "XtreamApiTask")
@@ -52,7 +52,7 @@ sub onResponse(event as object)
     end for
 
     if m.programmes.Count() = 0
-        m.top.failed = "Nothing in the archive for this channel yet."
+        m.top.failed = tr("Nothing in the archive for this channel yet.")
         return
     end if
 
@@ -69,7 +69,7 @@ sub onSelected()
 
     stamp = Xtream.timeshiftStamp(pick(listing, "start", ""))
     if stamp = ""
-        m.top.failed = "This programme has no usable start time."
+        m.top.failed = tr("This programme has no usable start time.")
         return
     end if
 

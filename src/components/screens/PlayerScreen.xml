@@ -7,7 +7,7 @@
     <!-- Buffering / reconnecting overlay, drawn on top of the video -->
     <Group id="bufferingGroup" visible="false" translation="[760, 480]">
       <Rectangle width="400" height="120" color="#151B2B" opacity="0.85" />
-      <Label id="bufferingLabel" text="Buffering…" width="400" height="120"
+      <Label id="bufferingLabel" width="400" height="120"
              horizAlign="center" vertAlign="center"
              font="font:MediumBoldSystemFont" color="#FFFFFF" />
     </Group>

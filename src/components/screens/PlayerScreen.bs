@@ -39,6 +39,7 @@ sub init()
     m.pendingStops = 0
     m.idleDialog = invalid
 
+    m.bufferingLabel.text = tr("Buffering…")
     m.retryTimer.duration = RETRY_DELAY_SECONDS
     m.idleTimer.duration = IDLE_PROMPT_SECONDS
     m.graceTimer.duration = IDLE_GRACE_SECONDS
@@ -205,7 +206,7 @@ sub handleError()
         m.idleTimer.control = "stop"
         stopVideo()
         showBuffering(true)
-        m.bufferingLabel.text = "Reconnecting…"
+        m.bufferingLabel.text = tr("Reconnecting…")
         m.retryTimer.control = "start"
         return
     end if
@@ -231,7 +232,7 @@ sub handleError()
     #if DEBUG
         message += Chr(10) + err.detail
     #end if
-    showError(message, "Playback error")
+    showError(message, tr("Playback error"))
 end sub
 
 ' Every deliberate stop goes through here so onVideoState can tell it from end-of-content.
@@ -273,7 +274,7 @@ end sub
 
 sub showBuffering(isVisible as boolean)
     m.bufferingGroup.visible = isVisible
-    if not isVisible then m.bufferingLabel.text = "Buffering…"
+    if not isVisible then m.bufferingLabel.text = tr("Buffering…")
 end sub
 
 sub onBufferingStatus()
@@ -289,7 +290,7 @@ sub onBufferingStatus()
     value = raw
     if value > 0 and value <= 1 then value = value * 100 ' some firmwares report 0..1
     percent = Int(value)
-    m.bufferingLabel.text = "Buffering… " + percent.ToStr() + "%"
+    m.bufferingLabel.text = tr("Buffering…") + " " + percent.ToStr() + "%"
 end sub
 
 ' ---------- audio / subtitle tracks ----------
@@ -373,7 +374,7 @@ sub onNumberEntered()
     if index >= 0
         playAt(index)
     else
-        m.banner.message = "Channel " + entered + " not found"
+        m.banner.message = tr("Channel {n} not found").Replace("{n}", entered)
     end if
 end sub
 
@@ -417,9 +418,9 @@ sub onIdleTimer()
     if m.failed then return
 
     dialog = CreateObject("roSGNode", "Dialog")
-    dialog.title = "Still watching?"
-    dialog.message = "Playback stops shortly to free up your provider connection."
-    dialog.buttons = ["Continue watching", "Exit"]
+    dialog.title = tr("Still watching?")
+    dialog.message = tr("Playback stops shortly to free up your provider connection.")
+    dialog.buttons = [tr("Continue watching"), tr("Exit")]
     dialog.observeField("buttonSelected", "onIdleDialogButton")
     dialog.observeField("wasClosed", "onIdleDialogClosed")
     m.idleDialog = dialog

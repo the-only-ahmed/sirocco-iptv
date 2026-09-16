@@ -2,13 +2,12 @@
 <!-- Keyboard on the left, results on the right. Searches the cached catalogues, no requests per keystroke. -->
 <component name="SearchScreen" extends="BaseScreen">
   <children>
-    <Label id="title" text="Search" translation="[120, 60]" font="font:LargeBoldSystemFont" color="#FFFFFF" />
+    <Label id="title" translation="[120, 60]" font="font:LargeBoldSystemFont" color="#FFFFFF" />
 
     <MiniKeyboard id="keyboard" translation="[120, 150]" />
     <Label id="typed" translation="[120, 620]" width="500" height="40"
            font="font:MediumBoldSystemFont" color="#FFFFFF" />
     <Label id="hint" translation="[120, 668]" width="500" height="60" wrap="true" maxLines="2"
-           text="Results cover live channels, movies and series"
            font="font:SmallestSystemFont" color="#5C6577" />
 
     <Label id="count" translation="[700, 150]" width="1100" height="30"

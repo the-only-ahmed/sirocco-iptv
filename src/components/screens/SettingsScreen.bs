@@ -9,6 +9,7 @@ sub init()
     m.dialog = invalid
     m.dialogAction = ""
     m.editingUserAgent = false
+    m.top.findNode("title").text = tr("Settings")
 
     m.list.observeField("itemSelected", "onItemSelected")
     m.top.observeField("params", "onParams")
@@ -27,13 +28,13 @@ sub buildList()
     content = CreateObject("roSGNode", "ContentNode")
 
     addRow(content, "User-Agent:  " + Xtream.userAgent(), "userAgent")
-    addRow(content, "Reset User-Agent to default", "resetUserAgent")
-    addRow(content, "Parental PIN:  " + pinState(), "pin")
-    addRow(content, "Clear locked categories", "clearLocks")
-    addRow(content, "Clear cached lists", "clearCache")
-    addRow(content, "Show hidden channels and movies", "clearDead")
-    addRow(content, "Clear watch history (" + Registry.progressList().Count().ToStr() + ")", "clearProgress")
-    addRow(content, "Clear favorites (" + Registry.favorites().Count().ToStr() + ")", "clearFavorites")
+    addRow(content, tr("Reset User-Agent to default"), "resetUserAgent")
+    addRow(content, tr("Parental PIN:") + "  " + pinState(), "pin")
+    addRow(content, tr("Clear locked categories"), "clearLocks")
+    addRow(content, tr("Clear cached lists"), "clearCache")
+    addRow(content, tr("Show hidden channels and movies"), "clearDead")
+    addRow(content, tr("Clear watch history ({n})").Replace("{n}", Registry.progressList().Count().ToStr()), "clearProgress")
+    addRow(content, tr("Clear favorites ({n})").Replace("{n}", Registry.favorites().Count().ToStr()), "clearFavorites")
 
     m.list.content = content
 end sub
@@ -45,8 +46,8 @@ sub addRow(content as object, label as string, action as string)
 end sub
 
 function pinState() as string
-    if Registry.parentalPin() = "" then return "not set"
-    return "set  ·  OK to change"
+    if Registry.parentalPin() = "" then return tr("not set")
+    return tr("set  ·  OK to change")
 end function
 
 function aboutText() as string
@@ -54,8 +55,8 @@ function aboutText() as string
     device = CreateObject("roDeviceInfo")
 
     lines = "Sirocco IPTV " + info.GetVersion()
-    lines += Chr(10) + "Channel " + info.GetID()
-    if info.IsDev() then lines += "  (sideloaded)"
+    lines += Chr(10) + tr("Channel {id}").Replace("{id}", info.GetID())
+    if info.IsDev() then lines += "  " + tr("(sideloaded)")
     lines += Chr(10) + Chr(10) + device.GetModelDisplayName() + "  ·  " + device.GetModel()
     lines += Chr(10) + "Roku OS " + device.GetOSVersion().major + "." + device.GetOSVersion().minor
 
@@ -63,16 +64,16 @@ function aboutText() as string
     if auth <> invalid and auth.baseUrl <> invalid
         lines += Chr(10) + Chr(10) + auth.username + Chr(10) + auth.baseUrl
         if auth.streamBaseUrl <> invalid and auth.streamBaseUrl <> "" and auth.streamBaseUrl <> auth.baseUrl
-            lines += Chr(10) + "streams: " + auth.streamBaseUrl
+            lines += Chr(10) + tr("streams: {url}").Replace("{url}", auth.streamBaseUrl)
         end if
     end if
 
     account = m.global.account
     if account <> invalid
         expiry = Xtream.dateLabel(account.expDate)
-        if expiry <> "" then lines += Chr(10) + "expires " + expiry
+        if expiry <> "" then lines += Chr(10) + tr("expires {date}").Replace("{date}", expiry)
         connections = Registry.number(account, "maxConnections")
-        if connections > 0 then lines += Chr(10) + connections.ToStr() + " connection(s)"
+        if connections > 0 then lines += Chr(10) + Xtream.connectionsLabel(connections)
     end if
     return lines
 end function
@@ -88,7 +89,7 @@ sub onItemSelected()
         editUserAgent()
     else if action = "resetUserAgent"
         Xtream.setUserAgent("")
-        showToast("User-Agent reset")
+        showToast(tr("User-Agent reset"))
         buildList()
     else if action = "pin"
         changePin()
@@ -104,7 +105,7 @@ end sub
 ' Overrides BaseScreen: the keyboard was editing the User-Agent.
 sub onTextEntered(value as string)
     Xtream.setUserAgent(value)
-    showToast("User-Agent saved")
+    showToast(tr("User-Agent saved"))
     buildList()
     m.list.setFocus(true)
 end sub
@@ -112,7 +113,7 @@ end sub
 ' Changing the PIN needs the old one first; requirePin() reports back through pinPassed.
 sub changePin()
     if Registry.parentalPin() = ""
-        askNumber("Create a parental PIN (4 digits)", true, "newPin")
+        askNumber(tr("Create a parental PIN (4 digits)"), true, "newPin")
         return
     end if
     m.top.observeFieldScoped("pinPassed", "onPinPassed")
@@ -121,24 +122,24 @@ end sub
 
 sub onPinPassed()
     m.top.unobserveFieldScoped("pinPassed")
-    askNumber("New PIN (4 digits)", true, "newPin")
+    askNumber(tr("New PIN (4 digits)"), true, "newPin")
 end sub
 
 ' ---------- confirmations ----------
 
 sub confirm(action as string)
     messages = {
-        clearLocks: "Unlock every category that was locked by hand?"
-        clearCache: "Clear the cached channel and movie lists? They will be fetched again."
-        clearDead: "Show every channel and movie again, including ones that failed to play?"
-        clearProgress: "Forget where you got to in every movie and episode?"
-        clearFavorites: "Remove everything from favorites?"
+        clearLocks: tr("Unlock every category that was locked by hand?")
+        clearCache: tr("Clear the cached channel and movie lists? They will be fetched again.")
+        clearDead: tr("Show every channel and movie again, including ones that failed to play?")
+        clearProgress: tr("Forget where you got to in every movie and episode?")
+        clearFavorites: tr("Remove everything from favorites?")
     }
 
     dialog = CreateObject("roSGNode", "Dialog")
-    dialog.title = "Are you sure?"
+    dialog.title = tr("Are you sure?")
     dialog.message = messages[action]
-    dialog.buttons = ["Yes", "Cancel"]
+    dialog.buttons = [tr("Yes"), tr("Cancel")]
     dialog.observeField("buttonSelected", "onConfirmButton")
     dialog.observeField("wasClosed", "dismissDialog")
     m.dialogAction = action
@@ -159,22 +160,22 @@ sub onConfirmButton()
         for each key in Registry.lockedCategories()
             Registry.toggleLockedCategory(key)
         end for
-        showToast("Locked categories cleared")
+        showToast(tr("Locked categories cleared"))
     else if action = "clearCache"
-        showToast(clearCache().ToStr() + " cached lists cleared")
+        showToast(tr("{n} cached lists cleared").Replace("{n}", clearCache().ToStr()))
     else if action = "clearDead"
         Registry.clearDead()
-        showToast("Hidden items restored")
+        showToast(tr("Hidden items restored"))
     else if action = "clearProgress"
         for each entry in Registry.progressList()
             Registry.saveProgress(entry.id, 0, entry.duration) ' a zero position drops the entry
         end for
-        showToast("Watch history cleared")
+        showToast(tr("Watch history cleared"))
     else if action = "clearFavorites"
         for each id in Registry.favorites()
             Registry.toggleFavorite(id)
         end for
-        showToast("Favorites cleared")
+        showToast(tr("Favorites cleared"))
     end if
     buildList()
 end sub

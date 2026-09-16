@@ -43,7 +43,7 @@ sub onSeriesInfo(event as object)
     content = CreateObject("roSGNode", "ContentNode")
     for each season in m.seasons
         item = content.createChild("ContentNode")
-        item.title = "Season " + season
+        item.title = tr("Season {n}").Replace("{n}", season)
     end for
     m.seasonsList.content = content
 

@@ -17,7 +17,7 @@
     <field id="pinPassed" type="boolean" alwaysNotify="true" />
   </interface>
   <children>
-    <Label id="loadingLabel" text="Loading…" visible="false" translation="[120, 990]"
+    <Label id="loadingLabel" visible="false" translation="[120, 990]"
            font="font:MediumSystemFont" color="#8A93A6" />
   </children>
   <script type="text/brighterscript" uri="BaseScreen.bs" />

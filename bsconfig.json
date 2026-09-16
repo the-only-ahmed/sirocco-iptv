@@ -4,7 +4,8 @@
     "manifest",
     "source/**/*",
     "components/**/*",
-    "images/**/*"
+    "images/**/*",
+    "locale/**/*"
   ],
   "stagingDir": "build/staging",
   "outFile": "build/sirocco-iptv.zip",

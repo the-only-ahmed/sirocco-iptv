@@ -2,13 +2,13 @@ sub init()
     m.list = m.top.findNode("list")
 
     m.entries = [
-        { title: "Home", key: "home" }
-        { title: "Search", key: "search" }
-        { title: "Live TV", key: "live" }
-        { title: "Movies", key: "vod" }
-        { title: "Series", key: "series" }
-        { title: "Settings", key: "settings" }
-        { title: "Log out", key: "logout" }
+        { title: tr("Home"), key: "home" }
+        { title: tr("Search"), key: "search" }
+        { title: tr("Live TV"), key: "live" }
+        { title: tr("Movies"), key: "vod" }
+        { title: tr("Series"), key: "series" }
+        { title: tr("Settings"), key: "settings" }
+        { title: tr("Log out"), key: "logout" }
     ]
 
     content = CreateObject("roSGNode", "ContentNode")

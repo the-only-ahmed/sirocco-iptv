@@ -34,7 +34,8 @@ sub init()
     m.focusIndex = -1
     m.pendingCategory = -1
     m.lockIndex = 0
-    m.titleBase = "Live TV"
+    m.titleBase = tr("Live TV")
+    m.title.text = m.titleBase
     m.favoritesOnly = false
     m.buildIndex = 0
     m.buildLimit = 0
@@ -50,7 +51,6 @@ sub init()
     m.buildTimer.observeField("fire", "appendChannelChunk")
     m.top.observeField("visible", "onVisibleChanged")
     m.top.observeField("dispose", "stopSweep") ' extra observer: BaseScreen keeps its own
-
     m.defaultFocus = m.categoriesList
     m.top.observeField("params", "onParams")
 end sub
@@ -72,9 +72,9 @@ sub onCategories(event as object)
     end if
 
     m.categories = res.data
-    m.categories.Unshift({ category_id: "", category_name: "All" })
+    m.categories.Unshift({ category_id: "", category_name: tr("All") })
     if Registry.favorites().Count() > 0
-        m.categories.Unshift({ category_id: FAVORITES_ID, category_name: "★ Favorites" })
+        m.categories.Unshift({ category_id: FAVORITES_ID, category_name: "★ " + tr("Favorites") })
     end if
     buildCategoryList()
 
@@ -94,8 +94,8 @@ sub buildCategoryList()
     content = CreateObject("roSGNode", "ContentNode")
     for each cat in m.categories
         item = content.createChild("ContentNode")
-        name = pick(cat, "category_name", "Untitled")
-        if isLockedCategory(categoryKey(cat), name) then name += "   (locked)"
+        name = pick(cat, "category_name", tr("Untitled"))
+        if isLockedCategory(categoryKey(cat), name) then name += "   " + tr("(locked)")
         item.title = name
     end for
     m.categoriesList.content = content
@@ -184,8 +184,8 @@ sub rebuildChannels(keepStreamId as string)
     m.channelContent = CreateObject("roSGNode", "ContentNode")
     m.channelsList.content = m.channelContent
 
-    m.titleBase = "Live TV — " + m.buildLimit.ToStr() + " channels"
-    if hidden > 0 then m.titleBase += "  (" + hidden.ToStr() + " hidden as dead — press Replay on a category to restore)"
+    m.titleBase = tr("Live TV — {n} channels").Replace("{n}", m.buildLimit.ToStr())
+    if hidden > 0 then m.titleBase += "  " + tr("({n} hidden as dead — press Replay on a category to restore)").Replace("{n}", hidden.ToStr())
     m.title.text = m.titleBase
     appendChannelChunk()
 end sub
@@ -199,7 +199,7 @@ sub appendChannelChunk()
         raw = m.channels[i]
         node = m.channelContent.createChild("ContentNode")
         node.addFields({ num: "", nowTitle: "" })
-        node.title = pick(raw, "name", "Untitled")
+        node.title = pick(raw, "name", tr("Untitled"))
         node.HDPOSTERURL = Xtream.toStr(pick(raw, "stream_icon", ""))
         node.num = Xtream.toStr(pick(raw, "num", (i + 1).ToStr()))
     end for
@@ -237,7 +237,7 @@ sub onSweepProgress(done as integer, total as integer)
     if total = 0
         m.title.text = m.titleBase
     else
-        m.title.text = m.titleBase + "  ·  checking " + done.ToStr() + "/" + total.ToStr()
+        m.title.text = m.titleBase + "  ·  " + Xtream.checkingLabel(done, total)
     end if
 end sub
 
@@ -262,7 +262,7 @@ sub onChannelFocused()
 
     m.epgPanel.channelName = pick(channel, "name", "")
     m.epgPanel.hint = ""
-    if Xtream.toInt(pick(channel, "tv_archive", 0)) = 1 then m.epgPanel.hint = "Press Play for catch-up"
+    if Xtream.toInt(pick(channel, "tv_archive", 0)) = 1 then m.epgPanel.hint = tr("Press Play for catch-up")
 
     cached = cachedEpg(streamIdOf(channel))
     if cached <> invalid
@@ -312,7 +312,7 @@ end function
 
 sub applyEpg(listings as object)
     if listings.Count() = 0
-        m.epgPanel.notice = "No programme information"
+        m.epgPanel.notice = tr("No programme information")
     else
         m.epgPanel.epg = Xtream.nowNext(listings)
     end if
@@ -414,11 +414,11 @@ sub toggleCategoryLock()
     name = pick(cat, "category_name", "")
 
     if Xtream.isAdultName(name)
-        showToast(name + " is always locked")
+        showToast(tr("{name} is always locked").Replace("{name}", name))
         return
     end if
     if Xtream.toStr(pick(cat, "category_id", "")) = ""
-        showToast("Lock individual categories rather than All or Favorites")
+        showToast(tr("Lock individual categories rather than All or Favorites"))
         return
     end if
 

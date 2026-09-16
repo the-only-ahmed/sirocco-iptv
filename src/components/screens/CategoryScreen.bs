@@ -15,7 +15,7 @@ end sub
 
 sub onParams()
     p = m.top.params
-    m.title.text = pick(p, "title", "Categories")
+    m.title.text = pick(p, "title", tr("Categories"))
 
     actions = { live: "get_live_categories", vod: "get_vod_categories", series: "get_series_categories" }
     setLoading(true)
@@ -32,7 +32,7 @@ sub onCategories(event as object)
 
     m.categories = res.data
     ' Synthetic "All" entry - Xtream returns everything when category_id is omitted
-    m.categories.Unshift({ category_id: "", category_name: "All" })
+    m.categories.Unshift({ category_id: "", category_name: tr("All") })
     buildList()
 end sub
 
@@ -41,8 +41,8 @@ sub buildList()
     content = CreateObject("roSGNode", "ContentNode")
     for each cat in m.categories
         item = content.createChild("ContentNode")
-        name = pick(cat, "category_name", "Untitled")
-        if isLockedCategory(categoryKey(cat), name) then name += "   (locked)"
+        name = pick(cat, "category_name", tr("Untitled"))
+        if isLockedCategory(categoryKey(cat), name) then name += "   " + tr("(locked)")
         item.title = name
     end for
     m.list.content = content
@@ -86,11 +86,11 @@ sub toggleLock()
     cat = m.categories[index]
     name = pick(cat, "category_name", "")
     if Xtream.toStr(pick(cat, "category_id", "")) = ""
-        showToast("Lock individual categories rather than All")
+        showToast(tr("Lock individual categories rather than All"))
         return
     end if
     if Xtream.isAdultName(name)
-        showToast(name + " is always locked")
+        showToast(tr("{name} is always locked").Replace("{name}", name))
         return
     end if
 

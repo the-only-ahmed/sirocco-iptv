@@ -9,7 +9,7 @@ sub init()
 
     ' Host and Port are separate: people know their server as "host" and "port", not as a URL.
     m.fieldOrder = ["host", "port", "username", "password"]
-    m.fieldLabels = ["Host", "Port", "Username", "Password"]
+    m.fieldLabels = [tr("Host"), tr("Port"), tr("Username"), tr("Password")]
     m.editingField = ""
     m.deleteDialog = invalid
     m.profiles = []
@@ -45,14 +45,14 @@ sub showPicker()
         item.title = profileLabel(profile)
     end for
     addItem = content.createChild("ContentNode")
-    addItem.title = "+  Add a new server"
+    addItem.title = "+  " + tr("Add a new server")
 
     m.profilesList.content = content
     m.profilesList.visible = true
     m.buttons.visible = false
 
-    m.subtitle.text = "Choose a server"
-    m.hint.text = "OK to connect   ·   * to remove the highlighted server"
+    m.subtitle.text = tr("Choose a server")
+    m.hint.text = tr("OK to connect   ·   * to remove the highlighted server")
     m.defaultFocus = m.profilesList
     m.profilesList.setFocus(true)
 end sub
@@ -83,9 +83,10 @@ sub confirmDelete()
 
     profile = m.profiles[index]
     dialog = CreateObject("roSGNode", "Dialog")
-    dialog.title = "Remove server"
-    dialog.message = hostOf(Registry.text(profile.baseUrl)) + " (" + Registry.text(profile.username) + ") will be removed from this list."
-    dialog.buttons = ["Remove", "Keep"]
+    dialog.title = tr("Remove server")
+    server = hostOf(Registry.text(profile.baseUrl)) + " (" + Registry.text(profile.username) + ")"
+    dialog.message = tr("{server} will be removed from this list.").Replace("{server}", server)
+    dialog.buttons = [tr("Remove"), tr("Keep")]
     dialog.observeField("buttonSelected", "onDeleteButton")
     dialog.observeField("wasClosed", "onDeleteClosed")
     m.deleteDialog = dialog
@@ -120,11 +121,10 @@ function profileLabel(profile as object) as string
     label = hostOf(Registry.text(profile.baseUrl)) + "   ·   " + Registry.text(profile.username)
 
     expiry = Xtream.dateLabel(profile.expDate)
-    if expiry <> "" then label += "   ·   expires " + expiry
+    if expiry <> "" then label += "   ·   " + tr("expires {date}").Replace("{date}", expiry)
 
     connections = Registry.number(profile, "maxConnections")
-    if connections > 0 then label += "   ·   " + connections.ToStr() + " connection"
-    if connections > 1 then label += "s"
+    if connections > 0 then label += "   ·   " + Xtream.connectionsLabel(connections)
     return label
 end function
 
@@ -141,8 +141,8 @@ end function
 sub showForm()
     m.profilesList.visible = false
     m.buttons.visible = true
-    m.subtitle.text = "Enter your Xtream Codes credentials"
-    m.hint.text = "Host example: provider.example   ·   Port: 8080   ·   an M3U URL pasted into Host fills everything in"
+    m.subtitle.text = tr("Enter your Xtream Codes credentials")
+    m.hint.text = tr("Host example: provider.example   ·   Port: 8080   ·   an M3U URL pasted into Host fills everything in")
     renderButtons()
     m.defaultFocus = m.buttons
     m.buttons.setFocus(true)
@@ -151,11 +151,11 @@ end sub
 sub renderButtons()
     masked = String(Len(m.form.password), "•")
     m.buttons.buttons = [
-        "Host:      " + m.form.host
-        "Port:      " + m.form.port
-        "Username:  " + m.form.username
-        "Password:  " + masked
-        "Connect"
+        m.fieldLabels[0] + ":   " + m.form.host
+        m.fieldLabels[1] + ":   " + m.form.port
+        m.fieldLabels[2] + ":   " + m.form.username
+        m.fieldLabels[3] + ":   " + masked
+        tr("Connect")
     ]
 end sub
 
@@ -169,7 +169,7 @@ sub onButtonSelected()
 
     ' A port is digits only, and a full QWERTY keyboard for four digits is miserable.
     if m.editingField = "port"
-        askNumber("Port", false)
+        askNumber(m.fieldLabels[idx], false)
         return
     end if
 
@@ -190,7 +190,7 @@ sub applyEdit(entered as string)
         if m3u <> invalid
             m.form = { host: m3u.host, port: m3u.port, username: m3u.username, password: m3u.password }
             renderButtons()
-            showToast("Credentials read from the M3U URL")
+            showToast(tr("Credentials read from the M3U URL"))
             return
         end if
 
@@ -223,7 +223,7 @@ sub connect()
     ' hostOf() strips the scheme: "" means nothing was typed, and a leading ":" means only a port was.
     named = hostOf(auth.baseUrl)
     if named = "" or Left(named, 1) = ":" or auth.username = "" or auth.password = ""
-        showError("Host, username and password are all required.")
+        showError(tr("Host, username and password are all required."))
         return
     end if
 
@@ -236,18 +236,18 @@ sub onConnectResponse(event as object)
     setLoading(false)
     res = event.getData()
     if not res.ok
-        showError(res.error, "Connection failed")
+        showError(res.error, tr("Connection failed"))
         return
     end if
 
     info = res.data.user_info
     authFlag = pick(info, "auth", 0)
     if info = invalid or (authFlag <> 1 and authFlag <> "1")
-        showError("The server rejected these credentials.", "Login failed")
+        showError(tr("The server rejected these credentials."), tr("Login failed"))
         return
     end if
     if pick(info, "status", "Active") <> "Active"
-        showError("Account status: " + pick(info, "status", "unknown"), "Account inactive")
+        showError(tr("Account status: {status}").Replace("{status}", pick(info, "status", tr("unknown"))), tr("Account inactive"))
         return
     end if
 

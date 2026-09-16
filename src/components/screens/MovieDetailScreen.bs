@@ -58,10 +58,10 @@ sub onInfo(event as object)
     director = Xtream.toStr(pick(info, "director", ""))
     castList = Xtream.toStr(pick(info, "cast", ""))
     line = ""
-    if castList <> "" then line = "Cast: " + castList
+    if castList <> "" then line = tr("Cast: {names}").Replace("{names}", castList)
     if director <> ""
         if line <> "" then line += "   ·   "
-        line += "Director: " + director
+        line += tr("Director: {name}").Replace("{name}", director)
     end if
     m.cast.text = line
 
@@ -84,7 +84,7 @@ function metaLine(info as object) as string
     end for
     if not Xtream.isPlayableExt(m.ext)
         if out <> "" then out += "   ·   "
-        out += "format not supported on Roku"
+        out += tr("format not supported on Roku")
     end if
     return out
 end function
@@ -111,16 +111,16 @@ sub buildButtons()
     content = CreateObject("roSGNode", "ContentNode")
 
     if m.resumeAt > 0
-        addButton(content, "Resume at " + clock(m.resumeAt), "resume")
-        addButton(content, "Play from start", "play")
+        addButton(content, tr("Resume at {time}").Replace("{time}", clock(m.resumeAt)), "resume")
+        addButton(content, tr("Play from start"), "play")
     else
-        addButton(content, "Play", "play")
+        addButton(content, tr("Play"), "play")
     end if
 
     if Registry.isFavorite(m.progressId)
-        addButton(content, "Remove from favorites", "favorite")
+        addButton(content, tr("Remove from favorites"), "favorite")
     else
-        addButton(content, "Add to favorites", "favorite")
+        addButton(content, tr("Add to favorites"), "favorite")
     end if
 
     m.buttons.content = content

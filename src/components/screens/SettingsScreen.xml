@@ -2,7 +2,7 @@
 <!-- One list of actions; each row's current value is part of its label. -->
 <component name="SettingsScreen" extends="BaseScreen">
   <children>
-    <Label id="title" text="Settings" translation="[120, 60]" font="font:LargeBoldSystemFont" color="#FFFFFF" />
+    <Label id="title" translation="[120, 60]" font="font:LargeBoldSystemFont" color="#FFFFFF" />
     <LabelList id="list" translation="[120, 160]" itemSize="[1100, 72]" numRows="9"
                color="#D5DAE5" focusedColor="#FFFFFF" />
     <Label id="about" translation="[1300, 160]" width="500" height="400" wrap="true" maxLines="12"

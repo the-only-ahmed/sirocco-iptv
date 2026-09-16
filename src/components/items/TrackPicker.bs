@@ -16,7 +16,7 @@ sub onTracks()
 
     if audioCount < 2 and subtitleCount = 0
         m.actions = []
-        show("Audio & subtitles", "This stream has no alternate audio or subtitle tracks.", ["OK"])
+        show(tr("Audio & subtitles"), tr("This stream has no alternate audio or subtitle tracks."), [tr("OK")])
         return
     end if
 
@@ -27,24 +27,24 @@ sub onTracks()
         current = asText(tracks.currentAudio)
         for each track in audio
             id = asText(track["Track"])
-            buttons.Push(marker(id, current) + "Audio: " + label(track, ["Name", "Language", "Track"]))
+            buttons.Push(marker(id, current) + tr("Audio: {track}").Replace("{track}", label(track, ["Name", "Language", "Track"])))
             m.actions.Push({ kind: "audio", id: id })
         end for
     end if
 
     if subtitleCount > 0
         current = asText(tracks.currentSubtitle)
-        buttons.Push(marker("", current) + "Subtitles: Off")
+        buttons.Push(marker("", current) + tr("Subtitles: Off"))
         m.actions.Push({ kind: "subtitlesOff", id: "" })
 
         for each track in subtitles
             id = asText(track["TrackName"])
-            buttons.Push(marker(id, current) + "Subtitles: " + label(track, ["Description", "Language", "TrackName"]))
+            buttons.Push(marker(id, current) + tr("Subtitles: {track}").Replace("{track}", label(track, ["Description", "Language", "TrackName"])))
             m.actions.Push({ kind: "subtitles", id: id })
         end for
     end if
 
-    show("Audio & subtitles", "", buttons)
+    show(tr("Audio & subtitles"), "", buttons)
 end sub
 
 sub show(title as string, message as string, buttons as object)
@@ -91,7 +91,7 @@ function label(track as object, keys as object) as string
         value = asText(track[key])
         if value <> "" then return value
     end for
-    return "Unknown"
+    return tr("Unknown")
 end function
 
 function asText(value as dynamic) as string

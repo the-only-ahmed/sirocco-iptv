@@ -2,7 +2,7 @@
 <!-- Live TV: categories | channels | now-next. params: {} -->
 <component name="LiveScreen" extends="BaseScreen">
   <children>
-    <Label id="title" text="Live TV" translation="[120, 60]" font="font:LargeBoldSystemFont" color="#FFFFFF" />
+    <Label id="title" translation="[120, 60]" font="font:LargeBoldSystemFont" color="#FFFFFF" />
 
     <!-- pane 1: categories -->
     <LabelList id="categories" translation="[120, 150]" itemSize="[360, 52]" numRows="14"

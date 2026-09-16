@@ -38,7 +38,7 @@ sub buildKeys()
         label.vertAlign = "center"
         label.font = "font:MediumBoldSystemFont"
         label.color = "#D5DAE5"
-        label.text = m.labels[i]
+        label.text = tr(m.labels[i]) ' labels stay English keys for activate(); only the drawing is translated
 
         m.keyNodes.Push({ background: background, label: label })
     end for

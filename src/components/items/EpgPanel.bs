@@ -34,7 +34,7 @@ sub render(nowTitle as string, time as string, nextTitle as string, progress as 
     m.now.text = nowTitle
     m.time.text = time
     m.next.text = nextTitle
-    m.nextLabel.text = "Next"
+    m.nextLabel.text = tr("Next")
     if nextTitle = "" then m.nextLabel.text = ""
     m.progress.width = m.progressBg.width * progress
 end sub

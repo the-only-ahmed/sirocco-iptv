@@ -68,9 +68,9 @@ sub rebuildItems()
     end for
 
     hidden = m.all.Count() - m.items.Count()
-    m.count.text = m.items.Count().ToStr() + " items"
-    if hidden > 0 then m.count.text += "   ·   " + hidden.ToStr() + " hidden (unsupported format or unavailable)"
-    if m.top.params.type = "vod" then m.count.text += "   ·   Replay checks availability"
+    m.count.text = tr("{n} items").Replace("{n}", m.items.Count().ToStr())
+    if hidden > 0 then m.count.text += "   ·   " + tr("{n} hidden (unsupported format or unavailable)").Replace("{n}", hidden.ToStr())
+    if m.top.params.type = "vod" then m.count.text += "   ·   " + tr("Replay checks availability")
 
     m.content = CreateObject("roSGNode", "ContentNode")
     m.grid.content = m.content
@@ -86,7 +86,7 @@ sub appendChunk()
     for i = m.buildIndex to limit - 1
         raw = m.items[i]
         node = m.content.createChild("ContentNode")
-        node.title = pick(raw, "name", "Untitled")
+        node.title = pick(raw, "name", tr("Untitled"))
         if isSeries
             node.HDPOSTERURL = pick(raw, "cover", "")
         else
@@ -132,7 +132,7 @@ sub onSweepProgress(done as integer, total as integer)
     if total = 0
         m.title.text = m.titleBase
     else
-        m.title.text = m.titleBase + "  ·  checking " + done.ToStr() + "/" + total.ToStr()
+        m.title.text = m.titleBase + "  ·  " + Xtream.checkingLabel(done, total)
     end if
 end sub
 

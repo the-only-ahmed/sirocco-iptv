@@ -14,7 +14,7 @@ end sub
 sub execute()
     auth = m.global.auth
     if auth = invalid or auth.baseUrl = invalid or auth.baseUrl = ""
-        m.top.response = { ok: false, error: "Not authenticated" }
+        m.top.response = { ok: false, error: tr("Not authenticated") }
         return
     end if
 
@@ -48,14 +48,14 @@ sub execute()
     xfer.SetMessagePort(port)
 
     if not xfer.AsyncGetToString()
-        m.top.response = { ok: false, error: "Could not start request" }
+        m.top.response = { ok: false, error: tr("Could not start request") }
         return
     end if
 
     msg = wait(REQUEST_TIMEOUT_MS, port)
     if msg = invalid
         xfer.AsyncCancel()
-        m.top.response = { ok: false, error: "Request timed out" }
+        m.top.response = { ok: false, error: tr("Request timed out") }
         return
     end if
 
@@ -75,7 +75,7 @@ sub execute()
     body = msg.GetString()
     data = ParseJson(body)
     if data = invalid
-        m.top.response = { ok: false, error: "Server returned invalid JSON" }
+        m.top.response = { ok: false, error: tr("Server returned invalid JSON") }
         return
     end if
 

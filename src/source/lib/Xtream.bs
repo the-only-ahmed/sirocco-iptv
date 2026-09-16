@@ -171,21 +171,21 @@ namespace Xtream
     function playbackError(errorCode as dynamic, errorStr as dynamic, errorInfo as dynamic) as object
         code = Xtream.httpCodeFromError(errorStr, errorInfo)
         if code = 401 or code = 404
-            text = "Channel is offline."
+            text = tr("Channel is offline.")
         else if code = 403
             ' Panels use 403 both for a dead stream and for a line that may not watch it.
-            text = "Channel is offline or not allowed on this line."
+            text = tr("Channel is offline or not allowed on this line.")
         else if code = 429 or code = 458
-            text = "Too many connections. Stop another device and try again."
+            text = tr("Too many connections. Stop another device and try again.")
         else if code >= 500
-            text = "The provider's server is not responding."
+            text = tr("The provider's server is not responding.")
         else
             haystack = LCase(Xtream.errorHaystack(errorStr, errorInfo))
             ' "no playable tracks" / "mediaerror" is what an AVI or an MPEG-2 stream reports.
             if Instr(1, haystack, "decoder") > 0 or Instr(1, haystack, "codec") > 0 or Instr(1, haystack, "unsupported") > 0 or Instr(1, haystack, "no playable tracks") > 0 or Instr(1, haystack, "mediaerror") > 0
-                text = "This stream's video or audio format is not supported on this Roku."
+                text = tr("This stream's video or audio format is not supported on this Roku.")
             else
-                text = "Could not play this stream."
+                text = tr("Could not play this stream.")
             end if
         end if
         return {
@@ -314,14 +314,28 @@ namespace Xtream
         return { host: parts.host, port: parts.port, username: username, password: password }
     end function
 
-    ' Unix timestamp -> "12 Mar 2027". Empty when there is nothing usable.
+    ' Unix timestamp -> "12 Mar 2027". Empty when there is nothing usable. Assembled by hand rather
+    ' than AsDateString(), whose month names are English whatever the device language.
     function dateLabel(value as dynamic) as string
         seconds = Xtream.toInt(value)
         if seconds <= 0 then return ""
         stamp = CreateObject("roDateTime")
         stamp.FromSeconds(seconds)
         stamp.ToLocalTime()
-        return stamp.AsDateString("short-month-no-weekday")
+        months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        return stamp.GetDayOfMonth().ToStr() + " " + tr(months[stamp.GetMonth() - 1]) + " " + stamp.GetYear().ToStr()
+    end function
+
+    ' "1 connection" / "3 connections" - the two forms are separate strings so a translation is
+    ' free to pluralise its own way.
+    function connectionsLabel(count as integer) as string
+        if count = 1 then return tr("1 connection")
+        return tr("{n} connections").Replace("{n}", count.ToStr())
+    end function
+
+    ' Sweep progress shown in a screen title.
+    function checkingLabel(done as integer, total as integer) as string
+        return tr("checking {done}/{total}").Replace("{done}", done.ToStr()).Replace("{total}", total.ToStr())
     end function
 
     ' "host:port/" -> "http://host:port"

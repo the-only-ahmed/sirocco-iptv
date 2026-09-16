@@ -5,6 +5,7 @@ import "pkg:/source/lib/Xtream.bs"
 
 sub init()
     m.loadingLabel = m.top.findNode("loadingLabel")
+    m.loadingLabel.text = tr("Loading…")
     m.defaultFocus = invalid
     m.activeTask = invalid
     m.errorDialog = invalid
@@ -57,12 +58,14 @@ sub apiRequest(action as string, params as object, callback as string)
     m.activeTask = task
 end sub
 
-sub showError(message as string, title = "Error" as string)
+' title defaults to "Error"; a default parameter cannot call tr(), so "" stands in for it.
+sub showError(message as string, title = "" as string)
     Log.error("Screen", message)
+    if title = "" then title = tr("Error")
     dialog = CreateObject("roSGNode", "Dialog")
     dialog.title = title
     dialog.message = message
-    dialog.buttons = ["OK"]
+    dialog.buttons = [tr("OK")]
     ' A Dialog only sets wasClosed when it is dismissed (Back, or close = true). Pressing a button
     ' fires buttonSelected and leaves the dialog up, so close it ourselves.
     dialog.observeField("buttonSelected", "baseOnErrorDialogButton")
@@ -72,11 +75,12 @@ sub showError(message as string, title = "Error" as string)
 end sub
 
 ' A dialog that just says something. Unlike showError() the screen stays put when it is dismissed.
-sub showInfo(message as string, title = "Info" as string)
+sub showInfo(message as string, title = "" as string)
+    if title = "" then title = tr("Info")
     dialog = CreateObject("roSGNode", "Dialog")
     dialog.title = title
     dialog.message = message
-    dialog.buttons = ["OK"]
+    dialog.buttons = [tr("OK")]
     dialog.observeField("buttonSelected", "dismissDialog")
     dialog.observeField("wasClosed", "dismissDialog")
     m.top.getScene().dialog = dialog
@@ -117,9 +121,9 @@ end function
 ' id = "vod:123" / "live:45" / "series:7". Says what happened without a dialog to dismiss.
 sub toggleFavorite(id as string, name as string)
     if Registry.toggleFavorite(id)
-        showToast("★  " + name + " added to favorites")
+        showToast("★  " + tr("{name} added to favorites").Replace("{name}", name))
     else
-        showToast(name + " removed from favorites")
+        showToast(tr("{name} removed from favorites").Replace("{name}", name))
     end if
 end sub
 
@@ -150,7 +154,7 @@ sub askText(title as string, value as string)
 
     dialog.title = title
     if dialog.hasField("text") then dialog.text = value
-    if dialog.hasField("buttons") then dialog.buttons = ["OK", "Cancel"]
+    if dialog.hasField("buttons") then dialog.buttons = [tr("OK"), tr("Cancel")]
     dialog.observeField("buttonSelected", "baseOnTextButton")
     dialog.observeField("wasClosed", "baseOnTextClosed")
     m.textDialog = dialog
@@ -222,8 +226,8 @@ end sub
 ' a while protects nothing once the parent walks away from an app that is already open.
 sub requirePin()
 
-    title = "Parental PIN"
-    if Registry.parentalPin() = "" then title = "Create a parental PIN (4 digits)"
+    title = tr("Parental PIN")
+    if Registry.parentalPin() = "" then title = tr("Create a parental PIN (4 digits)")
     askNumber(title, true, "pin")
 end sub
 
@@ -234,17 +238,17 @@ sub checkPin(entered as string)
     end if
     if Len(entered) < 4
         m.pendingLockKey = ""
-        showToast("A PIN needs 4 digits")
+        showToast(tr("A PIN needs 4 digits"))
         return
     end if
 
     stored = Registry.parentalPin()
     if stored = ""
         Registry.setParentalPin(entered)
-        showToast("Parental PIN set")
+        showToast(tr("Parental PIN set"))
     else if entered <> stored
         m.pendingLockKey = ""
-        showToast("Wrong PIN")
+        showToast(tr("Wrong PIN"))
         return
     end if
     onPinSatisfied()
@@ -254,11 +258,11 @@ end sub
 sub setNewPin(entered as string)
     if entered = "" then return
     if Len(entered) < 4
-        showToast("A PIN needs 4 digits")
+        showToast(tr("A PIN needs 4 digits"))
         return
     end if
     Registry.setParentalPin(entered)
-    showToast("Parental PIN changed")
+    showToast(tr("Parental PIN changed"))
 end sub
 
 ' Where a correct PIN leads: either the lock it was asked for, or the category it was guarding.
@@ -269,9 +273,9 @@ sub onPinSatisfied()
 
     if key <> ""
         if Registry.toggleLockedCategory(key)
-            showToast(name + " locked")
+            showToast(tr("{name} locked").Replace("{name}", name))
         else
-            showToast(name + " unlocked")
+            showToast(tr("{name} unlocked").Replace("{name}", name))
         end if
         onLockChanged()
         return
@@ -282,9 +286,9 @@ end sub
 ' Offers to clear the learned dead list. Screens override onHiddenCleared() to redraw.
 sub confirmShowHidden()
     dialog = CreateObject("roSGNode", "Dialog")
-    dialog.title = "Hidden items"
-    dialog.message = "Show everything again, including channels and movies that failed to play?"
-    dialog.buttons = ["Show them all", "Keep hiding them"]
+    dialog.title = tr("Hidden items")
+    dialog.message = tr("Show everything again, including channels and movies that failed to play?")
+    dialog.buttons = [tr("Show them all"), tr("Keep hiding them")]
     dialog.observeField("buttonSelected", "baseOnShowHiddenButton")
     dialog.observeField("wasClosed", "dismissDialog")
     m.hiddenDialog = dialog
@@ -299,7 +303,7 @@ sub baseOnShowHiddenButton()
     if not clear then return
 
     Registry.clearDead()
-    showToast("Hidden items restored")
+    showToast(tr("Hidden items restored"))
     onHiddenCleared()
 end sub
 

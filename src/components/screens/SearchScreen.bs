@@ -11,6 +11,8 @@ sub init()
     m.count = m.top.findNode("count")
     m.results = m.top.findNode("results")
     m.debounce = m.top.findNode("debounce")
+    m.top.findNode("title").text = tr("Search")
+    m.top.findNode("hint").text = tr("Results cover live channels, movies and series")
 
     m.catalogue = { live: [], vod: [], series: [] }
     m.pending = 0
@@ -74,7 +76,7 @@ sub runSearch()
 
     if Len(query) < MIN_QUERY
         m.results.content = invalid
-        m.count.text = "Type at least " + MIN_QUERY.ToStr() + " letters"
+        m.count.text = tr("Type at least {n} letters").Replace("{n}", MIN_QUERY.ToStr())
         return
     end if
 
@@ -91,9 +93,9 @@ sub runSearch()
     m.results.content = content
 
     if m.matches.Count() = 0
-        m.count.text = "Nothing found for “" + m.keyboard.text + "”"
+        m.count.text = tr("Nothing found for “{query}”").Replace("{query}", m.keyboard.text)
     else
-        m.count.text = m.matches.Count().ToStr() + " results for “" + m.keyboard.text + "”"
+        m.count.text = tr("{n} results for “{query}”").Replace("{n}", m.matches.Count().ToStr()).Replace("{query}", m.keyboard.text)
     end if
 end sub
 
